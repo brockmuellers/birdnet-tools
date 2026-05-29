@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+import hashlib
+import hmac
 import json
 import os
 import sqlite3
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 DB_PATH = os.environ["BIRDNETPI_DB_PATH"]
 R2_ENDPOINT = os.environ["R2_ENDPOINT_URL"]
@@ -78,24 +80,90 @@ def write_json(data: dict, tmp_path: Path, final_path: Path) -> None:
         sys.exit(1)
 
 
+def _hmac_sha256(key: bytes, msg: str) -> bytes:
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def _signing_key(secret: str, date_stamp: str, region: str, service: str) -> bytes:
+    k = _hmac_sha256(("AWS4" + secret).encode("utf-8"), date_stamp)
+    k = _hmac_sha256(k, region)
+    k = _hmac_sha256(k, service)
+    return _hmac_sha256(k, "aws4_request")
+
+
 def upload_to_r2(local_path: Path) -> None:
-    client = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_KEY_ID,
-        aws_secret_access_key=R2_SECRET,
-        region_name="auto",
+    body = local_path.read_bytes()
+    payload_hash = hashlib.sha256(body).hexdigest()
+
+    now = datetime.now(timezone.utc)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    region = "auto"
+    service = "s3"
+
+    host = urllib.parse.urlparse(R2_ENDPOINT).netloc
+    url = f"{R2_ENDPOINT}/{R2_BUCKET}/{R2_OBJECT_KEY}"
+    canonical_uri = f"/{R2_BUCKET}/{urllib.parse.quote(R2_OBJECT_KEY, safe='')}"
+
+    # Headers must be in sorted order for canonical form; host is sent automatically
+    # by urllib but must be included here for signing
+    canonical_headers = (
+        f"cache-control:public, max-age=60\n"
+        f"content-type:application/json\n"
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "cache-control;content-type;host;x-amz-content-sha256;x-amz-date"
+
+    canonical_request = "\n".join([
+        "PUT",
+        canonical_uri,
+        "",  # empty query string
+        canonical_headers,
+        signed_headers,
+        payload_hash,
+    ])
+
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = "\n".join([
+        "AWS4-HMAC-SHA256",
+        amz_date,
+        credential_scope,
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+    ])
+
+    signing_key = _signing_key(R2_SECRET, date_stamp, region, service)
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    authorization = (
+        f"AWS4-HMAC-SHA256 Credential={R2_KEY_ID}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="PUT",
+        headers={
+            "Authorization": authorization,
+            "Cache-Control": "public, max-age=60",
+            "Content-Type": "application/json",
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amz_date,
+        },
     )
     try:
-        client.put_object(
-            Bucket=R2_BUCKET,
-            Key=R2_OBJECT_KEY,
-            Body=local_path.read_bytes(),
-            ContentType="application/json",
-            CacheControl="public, max-age=60",
-        )
-    except (BotoCoreError, ClientError) as e:
-        print(f"ERROR: R2 upload failed: {e}", file=sys.stderr)
+        with urllib.request.urlopen(req):
+            pass
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode(errors="replace")
+        print(f"ERROR: R2 upload failed: HTTP {e.code} {e.reason}", file=sys.stderr)
+        if body_text:
+            print(body_text, file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"ERROR: R2 upload failed: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
 

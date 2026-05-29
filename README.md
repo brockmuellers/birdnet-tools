@@ -9,8 +9,7 @@ Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2
 
 ### Prerequisites
 
-- Python 3
-- boto3: `pip3 install --user boto3`
+- Python 3 (no third-party packages required — the R2 upload uses stdlib `urllib` with a manual [AWS SigV4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html) signing implementation, avoiding the need to install `boto3` on the Pi)
 - A Cloudflare R2 bucket with an API token that has Object Read & Write permissions
 
 ### Setup

@@ -1,1 +1,1 @@
-boto3>=1.34
+# No external dependencies — upload uses stdlib urllib with manual AWS SigV4 signing.
