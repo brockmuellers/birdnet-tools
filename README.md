@@ -30,6 +30,19 @@ python3 scripts/excluded_detections.py [--days N]
 
 ## Cron jobs
 
+All cron entries use `run_cron.sh` as a wrapper. It passes the exit code through and appends an `ERROR` line to `failures.log` on failure, which `push_events.py` picks up and surfaces in the R2 event log.
+
+Define `REPO` once at the top of your crontab so the path only appears in one place:
+
+```
+crontab -e
+```
+
+Add at the top, before any job lines:
+```
+REPO=/home/sara/repos/birdnet-tools
+```
+
 ---
 
 ### run_backup.sh
@@ -79,8 +92,8 @@ crontab -e
 
 Add these lines:
 ```
-0 2 * * *   timeout 30m /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-0 3 * * 0   timeout 2h  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+0 2 * * *  $REPO/scripts/run_cron.sh db-backup   timeout 30m $REPO/scripts/run_backup.sh --db   >> $REPO/backup.log 2>&1
+0 3 * * 0  $REPO/scripts/run_cron.sh full-backup  timeout 2h  $REPO/scripts/run_backup.sh --full >> $REPO/backup.log 2>&1
 ```
 
 The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
@@ -138,7 +151,7 @@ crontab -e
 
 Add this line:
 ```
-30 2 * * *  timeout 30m /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py >> $REPO/backup.log 2>&1
 ```
 
 Scheduled at 2:30am — after the nightly local DB backup at 2:00am.
@@ -184,5 +197,107 @@ crontab -e
 
 Add this line:
 ```
-*/15 * * * * timeout 10m /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
+*/15 * * * *  $REPO/scripts/run_cron.sh export  timeout 10m $REPO/scripts/export_data.py >> $REPO/export.log 2>&1
+```
+
+---
+
+### sample_temp.py
+
+Samples chip temperature every 5 minutes and appends an event to `health_events.jsonl`. Logs `INFO` normally; logs `WARN` if the temperature exceeds `TEMP_WARN_C` (default 70°C). Events are picked up by `push_events.py` on its next run and included in the R2 event log.
+
+#### Prerequisites
+
+- Python 3
+- `/sys/class/thermal/thermal_zone0/temp` readable (standard on Raspberry Pi)
+
+#### Setup
+
+Optionally add to `.env`:
+```
+# TEMP_WARN_C=70  # optional, this is the default
+```
+
+Make the script executable:
+```
+chmod +x scripts/sample_temp.py
+```
+
+Run manually once to verify:
+```
+scripts/sample_temp.py
+```
+
+#### Install cron job
+
+```
+crontab -e
+```
+
+Add this line:
+```
+*/5 * * * *  $REPO/scripts/run_cron.sh temp-sample  timeout 30 $REPO/scripts/sample_temp.py >> $REPO/health.log 2>&1
+```
+
+---
+
+### push_events.py
+
+Aggregates events from multiple sources every 15 minutes, stores them locally in two JSONL files, and uploads a merged JSON to Cloudflare R2. The R2 object is intended for consumption by an external viewer that can color-code events by severity.
+
+**Sources:**
+- `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`) and `[ERROR]`-level messages
+- `export.log` / `backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
+- `failures.log` — non-zero exit codes written by `run_cron.sh`
+- `health_events.jsonl` — temperature samples from `sample_temp.py`
+
+**Local storage:** events accumulate in `health_events.jsonl` (temperature + log events) and `birdnet_events.jsonl` (journal events), pruned to `EVENT_LOG_RETAIN_DAYS` (default 7).
+
+**R2 payload shape:**
+```json
+{
+  "generated_at": "2026-06-01T12:00:00+00:00",
+  "timezone": "America/Los_Angeles",
+  "events": [
+    {"ts": "...", "level": "INFO",  "source": "birdnet", "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax)"},
+    {"ts": "...", "level": "WARN",  "source": "temp",    "msg": "72.1°C (exceeds threshold 70°C)"},
+    {"ts": "...", "level": "ERROR", "source": "cron",    "msg": "export exited with code 1"}
+  ]
+}
+```
+
+#### Prerequisites
+
+- Python 3 (no third-party packages required)
+- A Cloudflare R2 bucket with an API token that has Object Read & Write permissions
+
+#### Setup
+
+1. Ensure the shared R2 credentials are already in `.env` (same bucket as `export_data.py`).
+
+2. Optionally add to `.env`:
+   ```
+   # EVENT_LOG_RETAIN_DAYS=7              # optional, this is the default
+   # EVENT_LOG_OBJECT_KEY=birdnet-events.json  # optional, this is the default
+   ```
+
+3. Make the scripts executable:
+   ```
+   chmod +x scripts/push_events.py scripts/run_cron.sh
+   ```
+
+4. Run manually once to verify:
+   ```
+   scripts/push_events.py
+   ```
+
+#### Install cron job
+
+```
+crontab -e
+```
+
+Add this line:
+```
+*/15 * * * *  $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py >> $REPO/health.log 2>&1
 ```

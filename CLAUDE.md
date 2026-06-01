@@ -72,13 +72,15 @@ When more context is required to understand the functionality of BirdNET-Pi, its
 
 ## Cron jobs
 
-All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `failures.log` and surfaced in the R2 event log.
+All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `failures.log` and surfaced in the R2 event log. Set `REPO` once at the top of your crontab:
 
 ```
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh export      timeout 10m /home/sara/repos/birdnet-tools/scripts/export_data.py              >> /home/sara/repos/birdnet-tools/export.log  2>&1
-0 2 * * *   /home/sara/repos/birdnet-tools/scripts/run_cron.sh db-backup    timeout 30m /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db           >> /home/sara/repos/birdnet-tools/backup.log  2>&1
-0 3 * * 0   /home/sara/repos/birdnet-tools/scripts/run_cron.sh full-backup  timeout 2h  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full          >> /home/sara/repos/birdnet-tools/backup.log  2>&1
-30 2 * * *  /home/sara/repos/birdnet-tools/scripts/run_cron.sh db-r2-backup timeout 30m /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py               >> /home/sara/repos/birdnet-tools/backup.log  2>&1
-*/5 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh temp-sample  timeout 30  /home/sara/repos/birdnet-tools/scripts/sample_temp.py               >> /home/sara/repos/birdnet-tools/health.log  2>&1
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh push-events timeout 10m /home/sara/repos/birdnet-tools/scripts/push_events.py               >> /home/sara/repos/birdnet-tools/health.log  2>&1
+REPO=/home/sara/repos/birdnet-tools
+
+*/15 * * * * $REPO/scripts/run_cron.sh export       timeout 10m $REPO/scripts/export_data.py              >> $REPO/export.log  2>&1
+0 2 * * *   $REPO/scripts/run_cron.sh db-backup     timeout 30m $REPO/scripts/run_backup.sh --db           >> $REPO/backup.log  2>&1
+0 3 * * 0   $REPO/scripts/run_cron.sh full-backup   timeout 2h  $REPO/scripts/run_backup.sh --full          >> $REPO/backup.log  2>&1
+30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py               >> $REPO/backup.log  2>&1
+*/5 * * * * $REPO/scripts/run_cron.sh temp-sample   timeout 30  $REPO/scripts/sample_temp.py               >> $REPO/health.log  2>&1
+*/15 * * * * $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py               >> $REPO/health.log  2>&1
 ```
