@@ -66,9 +66,26 @@ def query_db(db_path: str) -> dict:
     return {"recent": recent, "monthly": monthly}
 
 
+def _local_timezone_name() -> str:
+    try:
+        link = os.readlink("/etc/localtime")
+        marker = "zoneinfo/"
+        idx = link.find(marker)
+        if idx != -1:
+            return link[idx + len(marker):]
+    except OSError:
+        pass
+    try:
+        return Path("/etc/timezone").read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    raise RuntimeError("Could not determine local IANA timezone name")
+
+
 def write_json(data: dict, tmp_path: Path, final_path: Path) -> None:
     payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "timezone": _local_timezone_name(),
         "recent_observations": data["recent"],
         "monthly_stats": data["monthly"],
     }
