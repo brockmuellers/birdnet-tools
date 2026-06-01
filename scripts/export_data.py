@@ -9,20 +9,21 @@ from datetime import datetime
 from pathlib import Path
 
 from _r2 import load_env, upload_to_r2
+from _utils import local_timezone_name
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-export.lock")
+_LOCK_FH = None
 
 
 def _acquire_lock() -> None:
-    lock_fh = LOCK_FILE.open("w")
+    global _LOCK_FH
+    _LOCK_FH = LOCK_FILE.open("w")
     try:
-        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         print(f"{datetime.now().isoformat()} WARN: Another export is already running. Skipping.")
         sys.exit(0)
-    # Keep the file handle open for the lifetime of the process — flock is released on close.
-    globals()["_lock_fh"] = lock_fh
 
 
 load_env(REPO_DIR / ".env")
@@ -83,26 +84,10 @@ def query_db(db_path: str) -> dict:
     return {"recent": recent, "monthly": monthly}
 
 
-def _local_timezone_name() -> str:
-    try:
-        link = os.readlink("/etc/localtime")
-        marker = "zoneinfo/"
-        idx = link.find(marker)
-        if idx != -1:
-            return link[idx + len(marker):]
-    except OSError:
-        pass
-    try:
-        return Path("/etc/timezone").read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
-    raise RuntimeError("Could not determine local IANA timezone name")
-
-
 def write_json(data: dict, tmp_path: Path, final_path: Path) -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "timezone": _local_timezone_name(),
+        "timezone": local_timezone_name(),
         "recent_observations": data["recent"],
         "monthly_stats": data["monthly"],
     }

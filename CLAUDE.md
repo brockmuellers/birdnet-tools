@@ -16,6 +16,12 @@ Currently, this repository:
 	- Nightly: copies `birds.db` via SQLite's online backup API (safe under concurrent writes), retaining the last N days
 	- Weekly: wraps BirdNET-Pi's `backup_data.sh` to produce a full tar of config + DB + audio clips + spectrograms; pauses BirdNET-Pi services during the run
 - Backs up `birds.db` to Cloudflare R2 nightly (`scripts/backup_db_r2.py`). Aborts with an error if the DB exceeds a configurable size ceiling; warns at 80% of that ceiling. Uses SQLite's online backup API for a safe snapshot, then uploads via SigV4.
+- Aggregates events and pushes them to Cloudflare R2 every 15 minutes (`scripts/push_events.py`). Sources:
+	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
+	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
+	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
+	- `health_events.jsonl`: chip temperature samples from `scripts/sample_temp.py` (every 5 min)
+	- Events are stored locally in `health_events.jsonl` and `birdnet_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, then merged by timestamp and uploaded as a single JSON to R2.
 
 ## Running
 
@@ -24,11 +30,15 @@ scripts/export_data.py                         # manual test run for export; rea
 scripts/backup_db_r2.py                        # manual test run for DB R2 backup; reads .env automatically
 scripts/run_backup.sh --db                     # nightly DB backup (test before enabling cron)
 scripts/run_backup.sh --full                   # weekly full backup (pauses BirdNET-Pi services)
+scripts/sample_temp.py                         # manual test run for temp sampling; reads .env automatically
+scripts/push_events.py                         # manual test run for event push; reads .env automatically
 python3 scripts/excluded_detections.py         # show frequency-excluded detections (last 7 days)
 python3 scripts/excluded_detections.py --days 14
 ```
 
-`export_data.py`, `backup_db_r2.py`, and `run_backup.sh` all use `flock` to prevent overlapping cron runs.
+`export_data.py`, `backup_db_r2.py`, `run_backup.sh`, `sample_temp.py`, and `push_events.py` all use `flock` to prevent overlapping cron runs.
+
+`run_cron.sh` is a thin wrapper used in all cron entries. It runs the given command and appends an ERROR line to `failures.log` if the exit code is non-zero, enabling `push_events.py` to surface cron failures alongside other events.
 
 `excluded_detections.py` reads from the `birdnet_analysis` systemd journal and queries the BirdNET-Pi metadata model via `~/BirdNET-Pi/birdnet/bin/python3` (the BirdNET-Pi venv, which has TensorFlow Lite). It does not need the `.env` file.
 
@@ -44,10 +54,13 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - `BACKUP_DISK_WARN_PCT` — log a WARN when backup disk exceeds this % full (default: 80)
 - `R2_DB_BACKUP_MAX_MB` — **required** by `backup_db_r2.py`; backup aborts if DB exceeds this many MB; warn logged at 80% of limit (note: upload reads the snapshot into memory, so allow ~2–3× the DB size in free RAM)
 - `R2_DB_BACKUP_OBJECT_KEY` — R2 object key for the DB backup (default: `birds.db`); overwritten nightly (no history kept in R2)
+- `TEMP_WARN_C` — log a WARN when chip temperature exceeds this value (default: 70°C)
+- `EVENT_LOG_RETAIN_DAYS` — days of events to keep locally and upload (default: 7)
+- `EVENT_LOG_OBJECT_KEY` — R2 object key for the event log (default: `birdnet-events.json`)
 
 ## Key design constraints
 
-- **Minimal third-party dependencies.** The R2 upload is implemented with stdlib `urllib` and a hand-rolled AWS SigV4 signing implementation in `scripts/_r2.py` (shared by `export_data.py` and `backup_db_r2.py`). Avoiding introducing `boto3` or any other external package — installing packages on the Pi is intentionally avoided.
+- **Minimal third-party dependencies.** The R2 upload is implemented with stdlib `urllib` and a hand-rolled AWS SigV4 signing implementation in `scripts/_r2.py` (shared by `export_data.py`, `backup_db_r2.py`, and `push_events.py`). Avoiding introducing `boto3` or any other external package — installing packages on the Pi is intentionally avoided.
 - The database is opened read-only via SQLite URI (`file:...?mode=ro`).
 - JSON is written atomically: written to a `.tmp` file first, then renamed with `os.replace`.
 - DB backups use `sqlite3.Connection.backup()` (stdlib), not `cp`. Plain file copy is unsafe on a live SQLite database: it reads at the OS level without respecting SQLite's locking, risking torn writes; it also misses pending WAL-mode writes in the `-wal` sidecar.
@@ -59,9 +72,13 @@ When more context is required to understand the functionality of BirdNET-Pi, its
 
 ## Cron jobs
 
+All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `failures.log` and surfaced in the R2 event log.
+
 ```
-*/15 * * * * timeout 10m  /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
-0 2 * * *   timeout 30m  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-0 3 * * 0   timeout 2h   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-30 2 * * *  timeout 30m  /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py      >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh export      timeout 10m /home/sara/repos/birdnet-tools/scripts/export_data.py              >> /home/sara/repos/birdnet-tools/export.log  2>&1
+0 2 * * *   /home/sara/repos/birdnet-tools/scripts/run_cron.sh db-backup    timeout 30m /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db           >> /home/sara/repos/birdnet-tools/backup.log  2>&1
+0 3 * * 0   /home/sara/repos/birdnet-tools/scripts/run_cron.sh full-backup  timeout 2h  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full          >> /home/sara/repos/birdnet-tools/backup.log  2>&1
+30 2 * * *  /home/sara/repos/birdnet-tools/scripts/run_cron.sh db-r2-backup timeout 30m /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py               >> /home/sara/repos/birdnet-tools/backup.log  2>&1
+*/5 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh temp-sample  timeout 30  /home/sara/repos/birdnet-tools/scripts/sample_temp.py               >> /home/sara/repos/birdnet-tools/health.log  2>&1
+*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_cron.sh push-events timeout 10m /home/sara/repos/birdnet-tools/scripts/push_events.py               >> /home/sara/repos/birdnet-tools/health.log  2>&1
 ```

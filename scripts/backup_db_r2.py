@@ -16,16 +16,17 @@ LOCK_FILE = Path("/tmp/birdnet-db-r2-backup.lock")
 TMP_DB = Path("/var/tmp/birdnet-db-r2-backup.db.tmp")
 
 _WARN_PCT = 80
+_LOCK_FH = None
 
 
 def _acquire_lock() -> None:
-    lock_fh = LOCK_FILE.open("w")
+    global _LOCK_FH
+    _LOCK_FH = LOCK_FILE.open("w")
     try:
-        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         print(f"{datetime.now().isoformat()} WARN: Another DB R2 backup is already running. Skipping.")
         sys.exit(0)
-    globals()["_lock_fh"] = lock_fh
 
 
 load_env(REPO_DIR / ".env")

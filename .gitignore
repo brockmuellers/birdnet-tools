@@ -2,3 +2,6 @@
 *.log
 *.tmp
 __pycache__/
+health_events.jsonl
+birdnet_events.jsonl
+.health_state.json
