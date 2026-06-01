@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -170,18 +171,22 @@ def upload_to_r2(local_path: Path) -> None:
             "x-amz-date": amz_date,
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30):
-            pass
-    except urllib.error.HTTPError as e:
-        body_text = e.read().decode(errors="replace")
-        print(f"ERROR: R2 upload failed: HTTP {e.code} {e.reason}", file=sys.stderr)
-        if body_text:
-            print(body_text, file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as e:
-        print(f"ERROR: R2 upload failed: {e.reason}", file=sys.stderr)
-        sys.exit(1)
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(req, timeout=30):
+                return
+        except urllib.error.HTTPError as e:
+            body_text = e.read().decode(errors="replace")
+            print(f"ERROR: R2 upload failed: HTTP {e.code} {e.reason}", file=sys.stderr)
+            if body_text:
+                print(body_text, file=sys.stderr)
+            sys.exit(1)
+        except urllib.error.URLError as e:
+            print(f"WARN: R2 upload attempt {attempt}/3 failed: {e.reason}", file=sys.stderr)
+            if attempt < 3:
+                time.sleep(5)
+    print("ERROR: R2 upload failed after 3 attempts", file=sys.stderr)
+    sys.exit(1)
 
 
 def main():
