@@ -42,7 +42,7 @@ def upload_to_r2(
     object_key: str,
     content_type: str = "application/octet-stream",
     extra_headers=None,
-    timeout: int = 300,
+    timeout: int = 30,
 ) -> None:
     """Upload local_path to R2 via a signed PUT request.
 

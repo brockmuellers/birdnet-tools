@@ -89,6 +89,7 @@ def main():
         upload_to_r2(
             TMP_DB,
             R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, R2_DB_OBJECT_KEY,
+            timeout=600,
         )
         print(f"  Uploaded to R2: s3://{R2_BUCKET}/{R2_DB_OBJECT_KEY}")
     finally:

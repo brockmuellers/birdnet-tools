@@ -79,8 +79,8 @@ crontab -e
 
 Add these lines:
 ```
-0 2 * * *   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-0 3 * * 0   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+0 2 * * *   timeout 30m /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+0 3 * * 0   timeout 2h  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
 ```
 
 The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
@@ -138,7 +138,7 @@ crontab -e
 
 Add this line:
 ```
-30 2 * * *  /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+30 2 * * *  timeout 30m /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py >> /home/sara/repos/birdnet-tools/backup.log 2>&1
 ```
 
 Scheduled at 2:30am — after the nightly local DB backup at 2:00am.
@@ -184,5 +184,5 @@ crontab -e
 
 Add this line:
 ```
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
+*/15 * * * * timeout 10m /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
 ```

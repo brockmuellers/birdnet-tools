@@ -60,8 +60,8 @@ When more context is required to understand the functionality of BirdNET-Pi, its
 ## Cron jobs
 
 ```
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
-0 2 * * *   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-0 3 * * 0   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
-30 2 * * *  /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py      >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+*/15 * * * * timeout 10m  /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
+0 2 * * *   timeout 30m  /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+0 3 * * 0   timeout 2h   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+30 2 * * *  timeout 30m  /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py      >> /home/sara/repos/birdnet-tools/backup.log 2>&1
 ```
