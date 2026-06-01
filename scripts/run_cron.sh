@@ -13,8 +13,8 @@ rc=$?
 
 if [[ $rc -ne 0 ]]; then
     {
-        flock -x 9
-        printf '%s ERROR: %s exited with code %d\n' "$(date -Iseconds)" "$LABEL" "$rc"
+        flock -x -w 5 9
+        printf '%s ERROR: %s exited with code %d\n' "$(date -Iseconds)" "$LABEL" "$rc" >&9
     } 9>>"$FAILURES_LOG"
 fi
 
