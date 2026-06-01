@@ -233,6 +233,7 @@ def main():
     for log_filename, source, state_key in [
         ("export.log",   "export",  "export_log_offset"),
         ("backup.log",   "backup",  "backup_log_offset"),
+        ("health.log",   "health",  "health_log_offset"),
         ("failures.log", "cron",    "failures_log_offset"),
     ]:
         offset = state.get(state_key, 0)

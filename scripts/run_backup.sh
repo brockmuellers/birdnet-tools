@@ -24,7 +24,7 @@ BIRDNET_BACKUP_SCRIPT="${HOME}/BirdNET-Pi/scripts/backup_data.sh"
 MODE="${1:-}"
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$BACKUP_LOG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
 check_disk() {
