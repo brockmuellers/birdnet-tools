@@ -171,7 +171,7 @@ def upload_to_r2(local_path: Path) -> None:
         },
     )
     try:
-        with urllib.request.urlopen(req):
+        with urllib.request.urlopen(req, timeout=30):
             pass
     except urllib.error.HTTPError as e:
         body_text = e.read().decode(errors="replace")
