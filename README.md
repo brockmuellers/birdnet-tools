@@ -32,16 +32,14 @@ python3 scripts/excluded_detections.py [--days N]
 
 All cron entries use `run_cron.sh` as a wrapper. It passes the exit code through and appends an `ERROR` line to `failures.log` on failure, which `push_events.py` picks up and surfaces in the R2 event log.
 
-Define `REPO` once at the top of your crontab so the path only appears in one place:
+`install_cron.sh` installs all jobs at once and is safe to re-run — it removes any existing birdnet-tools entries (including old absolute-path style entries) before adding the current set:
 
 ```
-crontab -e
+chmod +x scripts/install_cron.sh
+scripts/install_cron.sh
 ```
 
-Add at the top, before any job lines:
-```
-REPO=/home/sara/repos/birdnet-tools
-```
+It detects the repo path automatically from its own location, so no manual path editing is needed. After running, it prints the full updated crontab for review.
 
 ---
 
@@ -84,19 +82,9 @@ If disk space is constrained, the nightly DB-only backup is a much leaner option
    scripts/run_backup.sh --full
    ```
 
-#### Install cron jobs
-
-```
-crontab -e
-```
-
-Add these lines:
-```
-0 2 * * *  $REPO/scripts/run_cron.sh db-backup   timeout 30m $REPO/scripts/run_backup.sh --db   >> $REPO/backup.log 2>&1
-0 3 * * 0  $REPO/scripts/run_cron.sh full-backup  timeout 2h  $REPO/scripts/run_backup.sh --full >> $REPO/backup.log 2>&1
-```
-
 The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
+
+Run `scripts/install_cron.sh` to register the cron jobs (see [Cron jobs](#cron-jobs)).
 
 #### Restoring after SD card failure
 
@@ -143,18 +131,9 @@ Before uploading, the script checks the DB size against a configurable ceiling (
    scripts/backup_db_r2.py
    ```
 
-#### Install cron job
-
-```
-crontab -e
-```
-
-Add this line:
-```
-30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py >> $REPO/backup.log 2>&1
-```
-
 Scheduled at 2:30am — after the nightly local DB backup at 2:00am.
+
+Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
 
 ---
 
@@ -189,16 +168,7 @@ Check the log output, then verify the object appears in your R2 bucket in the Cl
 
 To make the JSON publicly accessible, enable **Allow Public Access** on the bucket in the Cloudflare dashboard.
 
-#### Install cron job
-
-```
-crontab -e
-```
-
-Add this line:
-```
-*/15 * * * *  $REPO/scripts/run_cron.sh export  timeout 10m $REPO/scripts/export_data.py >> $REPO/export.log 2>&1
-```
+Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
 
 ---
 
@@ -228,16 +198,7 @@ Run manually once to verify:
 scripts/sample_temp.py
 ```
 
-#### Install cron job
-
-```
-crontab -e
-```
-
-Add this line:
-```
-*/5 * * * *  $REPO/scripts/run_cron.sh temp-sample  timeout 30 $REPO/scripts/sample_temp.py >> $REPO/health.log 2>&1
-```
+Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
 
 ---
 
@@ -291,13 +252,4 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
    scripts/push_events.py
    ```
 
-#### Install cron job
-
-```
-crontab -e
-```
-
-Add this line:
-```
-*/15 * * * *  $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py >> $REPO/health.log 2>&1
-```
+Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
