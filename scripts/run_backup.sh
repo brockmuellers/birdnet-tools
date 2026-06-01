@@ -93,6 +93,12 @@ EOF
     check_disk
 }
 
+db_dev=$(stat --format="%d" "$BIRDNETPI_DB_PATH" 2>/dev/null || stat --format="%d" "$(dirname "$BIRDNETPI_DB_PATH")")
+dest_dev=$(stat --format="%d" "$BACKUP_DEST" 2>/dev/null || stat --format="%d" "$(dirname "$BACKUP_DEST")")
+if [[ "$db_dev" == "$dest_dev" ]]; then
+    log "WARN: BACKUP_DEST (${BACKUP_DEST}) is on the same drive as the source DB (${BIRDNETPI_DB_PATH}). A drive failure will lose both the source and the backup."
+fi
+
 case "$MODE" in
     --full) do_full ;;
     --db)   do_db ;;
