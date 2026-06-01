@@ -251,7 +251,7 @@ def main():
     print(f"[{datetime.now().isoformat()}] Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
     birdnet = _load_events(BIRDNET_EVENTS)
-    all_events = sorted(health + birdnet, key=lambda e: e.get("ts", ""))
+    all_events = sorted(health + birdnet, key=lambda e: e.get("ts", ""), reverse=True)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
