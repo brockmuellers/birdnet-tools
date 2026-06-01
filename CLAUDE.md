@@ -8,7 +8,7 @@ Contains auxiliary tools for a BirdNET-Pi installation on a Raspberry Pi. The re
 
 Currently, this repository:
 
-- Exports BirdNET-Pi detection data from a local SQLite database to Cloudflare R2 every 15 minutes. The exported JSON contains:
+- Exports BirdNET-Pi detection data from a local SQLite database to Cloudflare R2 every 15 minutes (`scripts/export_data.py`). The exported JSON contains:
 	- All bird detections from the last 7 days (`recent_observations`)
 	- All-time per-species counts broken down by month and 15-minute time-of-day bucket (`monthly_stats`)
 - Queries the systemd journal for detections excluded by the species frequency threshold and displays them with their current-week frequency scores (`scripts/excluded_detections.py`)
@@ -19,14 +19,14 @@ Currently, this repository:
 ## Running
 
 ```bash
-scripts/run_export.sh                          # manual test run for export; reads .env automatically
+scripts/export_data.py                         # manual test run for export; reads .env automatically
 scripts/run_backup.sh --db                     # nightly DB backup (test before enabling cron)
 scripts/run_backup.sh --full                   # weekly full backup (pauses BirdNET-Pi services)
 python3 scripts/excluded_detections.py         # show frequency-excluded detections (last 7 days)
 python3 scripts/excluded_detections.py --days 14
 ```
 
-`run_export.sh` and `run_backup.sh` both use `flock` to prevent overlapping cron runs.
+`export_data.py` and `run_backup.sh` both use `flock` to prevent overlapping cron runs.
 
 `excluded_detections.py` reads from the `birdnet_analysis` systemd journal and queries the BirdNET-Pi metadata model via `~/BirdNET-Pi/birdnet/bin/python3` (the BirdNET-Pi venv, which has TensorFlow Lite). It does not need the `.env` file.
 
@@ -43,7 +43,7 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 
 ## Key design constraints
 
-- **Minimal third-party dependencies.** The R2 upload is implemented with stdlib `urllib` and a hand-rolled AWS SigV4 signing implementation (`_hmac_sha256`, `_signing_key`, `upload_to_r2` in `export_data.py`). Avoiding introducing `boto3` or any other external package — installing packages on the Pi is intentionally avoided.
+- **Minimal third-party dependencies.** The R2 upload is implemented with stdlib `urllib` and a hand-rolled AWS SigV4 signing implementation (`_hmac_sha256`, `_signing_key`, `upload_to_r2` in `scripts/export_data.py`). Avoiding introducing `boto3` or any other external package — installing packages on the Pi is intentionally avoided.
 - The database is opened read-only via SQLite URI (`file:...?mode=ro`).
 - JSON is written atomically: written to a `.tmp` file first, then renamed with `os.replace`.
 - DB backups use `sqlite3.Connection.backup()` (stdlib), not `cp`. Plain file copy is unsafe on a live SQLite database: it reads at the OS level without respecting SQLite's locking, risking torn writes; it also misses pending WAL-mode writes in the `-wal` sidecar.
@@ -56,7 +56,7 @@ When more context is required to understand the functionality of BirdNET-Pi, its
 ## Cron jobs
 
 ```
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_export.sh >> /home/sara/repos/birdnet-tools/export.log 2>&1
+*/15 * * * * /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
 0 2 * * *   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --db   >> /home/sara/repos/birdnet-tools/backup.log 2>&1
 0 3 * * 0   /home/sara/repos/birdnet-tools/scripts/run_backup.sh --full >> /home/sara/repos/birdnet-tools/backup.log 2>&1
 ```

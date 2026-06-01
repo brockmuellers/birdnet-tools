@@ -107,15 +107,15 @@ Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2
    cp .env.example .env
    ```
 
-2. Make the cron wrapper executable:
+2. Make the script executable:
    ```
-   chmod +x scripts/run_export.sh
+   chmod +x scripts/export_data.py
    ```
 
 ### Test manually
 
 ```
-scripts/run_export.sh
+scripts/export_data.py
 ```
 
 Check the log output, then verify the object appears in your R2 bucket in the Cloudflare dashboard.
@@ -130,5 +130,5 @@ crontab -e
 
 Add this line:
 ```
-*/15 * * * * /home/sara/repos/birdnet-tools/scripts/run_export.sh >> /home/sara/repos/birdnet-tools/export.log 2>&1
+*/15 * * * * /home/sara/repos/birdnet-tools/scripts/export_data.py >> /home/sara/repos/birdnet-tools/export.log 2>&1
 ```

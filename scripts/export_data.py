@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Export BirdNET-Pi detections to JSON and upload to Cloudflare R2."""
+import fcntl
 import hashlib
 import hmac
 import json
@@ -11,6 +13,35 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+REPO_DIR = Path(__file__).resolve().parent.parent
+LOCK_FILE = Path("/tmp/birdnet-export.lock")
+
+
+def _load_env(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        os.environ.setdefault(key.strip(), val.strip())
+
+
+def _acquire_lock() -> None:
+    lock_fh = LOCK_FILE.open("w")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"{datetime.now().isoformat()} WARN: Another export is already running. Skipping.")
+        sys.exit(0)
+    # Keep the file handle open for the lifetime of the process — flock is released on close.
+    globals()["_lock_fh"] = lock_fh
+
+
+_load_env(REPO_DIR / ".env")
+_acquire_lock()
 
 DB_PATH = os.environ["BIRDNETPI_DB_PATH"]
 R2_ENDPOINT = os.environ["R2_ENDPOINT_URL"]
