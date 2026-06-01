@@ -3,6 +3,25 @@ Tools for displaying and manipulating data from a [BirdNET-Pi](https://github.co
 
 This repo should be cloned into the Raspberry Pi that's running your BirdNET installation.
 
+## excluded_detections.py
+
+Shows detections that were excluded because they fell below the [species occurrence frequency threshold](https://github.com/Nachtzuster/BirdNET-Pi/wiki/Settings#species-occurrence-frequency-threshold), along with the current-week frequency score for each species.
+
+### Prerequisites
+
+- BirdNET-Pi installed at `~/BirdNET-Pi` (uses its Python venv and metadata model)
+- `journalctl` access to the `birdnet_analysis` systemd service
+
+### Usage
+
+```
+python3 scripts/excluded_detections.py [--days N]
+```
+
+`--days` defaults to 7. The frequency values are looked up from the metadata model using the **current** week of year; for `--days` values that span more than two ISO weeks, the script prints a warning explaining the potential discrepancy.
+
+---
+
 ## export_data.py
 
 Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2 every 15 minutes. The JSON contains all observations from the last 7 days plus all-time per-species observation counts broken down by month and 15-minute time-of-day bucket.

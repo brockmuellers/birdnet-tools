@@ -11,14 +11,19 @@ Currently, this repository:
 - Exports BirdNET-Pi detection data from a local SQLite database to Cloudflare R2 every 15 minutes. The exported JSON contains:
 	- All bird detections from the last 7 days (`recent_observations`)
 	- All-time per-species counts broken down by month and 15-minute time-of-day bucket (`monthly_stats`)
+- Queries the systemd journal for detections excluded by the species frequency threshold and displays them with their current-week frequency scores (`scripts/excluded_detections.py`)
 
 ## Running
 
 ```bash
-scripts/run_export.sh        # manual test run; reads .env automatically
+scripts/run_export.sh                          # manual test run for export; reads .env automatically
+python3 scripts/excluded_detections.py         # show frequency-excluded detections (last 7 days)
+python3 scripts/excluded_detections.py --days 14
 ```
 
-The script uses `flock` to prevent overlapping cron runs.
+`run_export.sh` uses `flock` to prevent overlapping cron runs.
+
+`excluded_detections.py` reads from the `birdnet_analysis` systemd journal and queries the BirdNET-Pi metadata model via `~/BirdNET-Pi/birdnet/bin/python3` (the BirdNET-Pi venv, which has TensorFlow Lite). It does not need the `.env` file.
 
 ## Environment
 
