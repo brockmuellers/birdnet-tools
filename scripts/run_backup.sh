@@ -59,9 +59,11 @@ do_db() {
     date_str=$(date '+%Y-%m-%d')
     local db_dir="${BACKUP_DEST}/birds-db"
     local dest="${db_dir}/birds-${date_str}.db"
+    local tmp="${dest}.tmp"
     mkdir -p "$db_dir"
     log "Backing up DB to ${dest}..."
-    python3 - "$BIRDNETPI_DB_PATH" "$dest" <<'EOF'
+    set +e
+    python3 - "$BIRDNETPI_DB_PATH" "$tmp" <<'EOF'
 import sqlite3, sys
 src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
 dst = sqlite3.connect(sys.argv[2])
@@ -70,6 +72,14 @@ src.backup(dst)
 src.close()
 dst.close()
 EOF
+    rc=$?
+    set -e
+    if [[ $rc -ne 0 ]]; then
+        rm -f "$tmp"
+        log "ERROR: DB backup failed (exit code ${rc})"
+        exit 1
+    fi
+    mv -f "$tmp" "$dest"
     # Prune: keep the last BACKUP_DB_RETAIN_DAYS backups
     local to_delete
     to_delete=$(find "$db_dir" -name "birds-*.db" -type f | sort | head -n "-${BACKUP_DB_RETAIN_DAYS}")
