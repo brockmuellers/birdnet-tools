@@ -3,16 +3,22 @@ Tools for displaying and manipulating data from a [BirdNET-Pi](https://github.co
 
 This repo should be cloned into the Raspberry Pi that's running your BirdNET installation.
 
-## excluded_detections.py
+---
+
+## Data exploration
+
+---
+
+### excluded_detections.py
 
 Shows detections that were excluded because they fell below the [species occurrence frequency threshold](https://github.com/Nachtzuster/BirdNET-Pi/wiki/Settings#species-occurrence-frequency-threshold), along with the current-week frequency score for each species.
 
-### Prerequisites
+#### Prerequisites
 
 - BirdNET-Pi installed at `~/BirdNET-Pi` (uses its Python venv and metadata model)
 - `journalctl` access to the `birdnet_analysis` systemd service
 
-### Usage
+#### Usage
 
 ```
 python3 scripts/excluded_detections.py [--days N]
@@ -22,7 +28,11 @@ python3 scripts/excluded_detections.py [--days N]
 
 ---
 
-## run_backup.sh
+## Cron jobs
+
+---
+
+### run_backup.sh
 
 Backs up BirdNET-Pi data to a local drive (e.g., a USB stick) in two complementary ways:
 
@@ -30,18 +40,18 @@ Backs up BirdNET-Pi data to a local drive (e.g., a USB stick) in two complementa
 
 - **Weekly full backup** — wraps BirdNET-Pi's own `backup_data.sh`, which bundles your config, the full detection database, all extracted audio clips, and spectrogram charts into a single tar. Only one copy is kept (no rotation). **BirdNET-Pi services pause during this backup** — typically a few minutes for a large archive — so schedule it during low-activity hours. If the backup fails for any reason, the previous tar is preserved (the script writes to a `.tmp` file and only replaces the live backup on success).
 
-### Size expectations
+#### Size expectations
 
 A year of data at ~500 detections/day produces roughly 20 GB in the full backup: audio clips (MP3, ~6 seconds each) account for most of it (~14 GB), spectrograms (PNG) another ~8 GB, and `birds.db` is under 100 MB. A 64 GB USB drive is a comfortable target; 32 GB would be tight with a year's worth of clips.
 
 If disk space is constrained, the nightly DB-only backup is a much leaner option — it captures the complete detection record (timestamps, species, confidence, all metadata) at under 100 MB, and is sufficient to restore full analysis history. You lose the audio clips and spectrograms, but those aren't needed for the detection data itself.
 
-### Prerequisites
+#### Prerequisites
 
 - A writable destination directory (USB drive, NFS mount, etc.) set as `BACKUP_DEST` in `.env`
 - BirdNET-Pi installed at `~/BirdNET-Pi` (the full backup uses its `backup_data.sh`)
 
-### Setup
+#### Setup
 
 1. Add backup settings to `.env`:
    ```
@@ -61,7 +71,7 @@ If disk space is constrained, the nightly DB-only backup is a much leaner option
    scripts/run_backup.sh --full
    ```
 
-### Install cron jobs
+#### Install cron jobs
 
 ```
 crontab -e
@@ -75,7 +85,7 @@ Add these lines:
 
 The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
 
-### Restoring after SD card failure
+#### Restoring after SD card failure
 
 1. Fresh-install BirdNET-Pi on the new card using its installer
 2. Run:
@@ -91,16 +101,16 @@ cp /mnt/usb/birdnet-backup/birds-db/birds-YYYY-MM-DD.db ~/BirdNET-Pi/scripts/bir
 
 ---
 
-## export_data.py
+### export_data.py
 
 Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2 every 15 minutes. The JSON contains all observations from the last 7 days plus all-time per-species observation counts broken down by month and 15-minute time-of-day bucket.
 
-### Prerequisites
+#### Prerequisites
 
 - Python 3 (no third-party packages required — the R2 upload uses stdlib `urllib` with a manual [AWS SigV4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html) signing implementation, avoiding the need to install `boto3` on the Pi)
 - A Cloudflare R2 bucket with an API token that has Object Read & Write permissions
 
-### Setup
+#### Setup
 
 1. Copy the example env file and fill in your credentials:
    ```
@@ -112,7 +122,7 @@ Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2
    chmod +x scripts/export_data.py
    ```
 
-### Test manually
+#### Test manually
 
 ```
 scripts/export_data.py
@@ -122,7 +132,7 @@ Check the log output, then verify the object appears in your R2 bucket in the Cl
 
 To make the JSON publicly accessible, enable **Allow Public Access** on the bucket in the Cloudflare dashboard.
 
-### Install cron job
+#### Install cron job
 
 ```
 crontab -e
