@@ -101,6 +101,50 @@ cp /mnt/usb/birdnet-backup/birds-db/birds-YYYY-MM-DD.db ~/BirdNET-Pi/scripts/bir
 
 ---
 
+### backup_db_r2.py
+
+Backs up `birds.db` to Cloudflare R2 nightly using SQLite's online backup API — the same safe snapshot approach as the local DB backup, but uploaded to R2 for off-site storage. The object is overwritten each run (no history kept in R2); pair it with the local backup if you want rotation.
+
+Before uploading, the script checks the DB size against a configurable ceiling (`R2_DB_BACKUP_MAX_MB`). It aborts with an error if the ceiling is exceeded, and logs a warning once the DB reaches 80% of the limit. The snapshot is written to `/var/tmp` (not `/tmp`) to avoid doubling DB size in RAM on Pis where `/tmp` is a ramdisk.
+
+#### Prerequisites
+
+- Python 3 (no third-party packages required)
+- A Cloudflare R2 bucket with an API token that has Object Read & Write permissions
+
+#### Setup
+
+1. Add these variables to your `.env`:
+   ```
+   R2_DB_BACKUP_MAX_MB=500          # required; abort threshold in MB
+   # R2_DB_BACKUP_OBJECT_KEY=birds.db  # optional, this is the default
+   ```
+
+2. Make the script executable:
+   ```
+   chmod +x scripts/backup_db_r2.py
+   ```
+
+3. Run manually once to verify it works before trusting cron:
+   ```
+   scripts/backup_db_r2.py
+   ```
+
+#### Install cron job
+
+```
+crontab -e
+```
+
+Add this line:
+```
+30 2 * * *  /home/sara/repos/birdnet-tools/scripts/backup_db_r2.py >> /home/sara/repos/birdnet-tools/backup.log 2>&1
+```
+
+Scheduled at 2:30am — after the nightly local DB backup at 2:00am.
+
+---
+
 ### export_data.py
 
 Exports BirdNET-Pi detection data to a JSON file and uploads it to Cloudflare R2 every 15 minutes. The JSON contains all observations from the last 7 days plus all-time per-species observation counts broken down by month and 15-minute time-of-day bucket.

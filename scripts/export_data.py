@@ -1,32 +1,17 @@
 #!/usr/bin/env python3
 """Export BirdNET-Pi detections to JSON and upload to Cloudflare R2."""
 import fcntl
-import hashlib
-import hmac
 import json
 import os
 import sqlite3
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+
+from _r2 import load_env, upload_to_r2
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-export.lock")
-
-
-def _load_env(path: Path) -> None:
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        os.environ.setdefault(key.strip(), val.strip())
 
 
 def _acquire_lock() -> None:
@@ -40,7 +25,7 @@ def _acquire_lock() -> None:
     globals()["_lock_fh"] = lock_fh
 
 
-_load_env(REPO_DIR / ".env")
+load_env(REPO_DIR / ".env")
 _acquire_lock()
 
 DB_PATH = os.environ["BIRDNETPI_DB_PATH"]
@@ -129,97 +114,6 @@ def write_json(data: dict, tmp_path: Path, final_path: Path) -> None:
         sys.exit(1)
 
 
-def _hmac_sha256(key: bytes, msg: str) -> bytes:
-    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
-
-def _signing_key(secret: str, date_stamp: str, region: str, service: str) -> bytes:
-    k = _hmac_sha256(("AWS4" + secret).encode("utf-8"), date_stamp)
-    k = _hmac_sha256(k, region)
-    k = _hmac_sha256(k, service)
-    return _hmac_sha256(k, "aws4_request")
-
-
-def upload_to_r2(local_path: Path) -> None:
-    body = local_path.read_bytes()
-    payload_hash = hashlib.sha256(body).hexdigest()
-
-    now = datetime.now(timezone.utc)
-    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
-    date_stamp = now.strftime("%Y%m%d")
-    region = "auto"
-    service = "s3"
-
-    host = urllib.parse.urlparse(R2_ENDPOINT).netloc
-    url = f"{R2_ENDPOINT}/{R2_BUCKET}/{R2_OBJECT_KEY}"
-    canonical_uri = f"/{R2_BUCKET}/{urllib.parse.quote(R2_OBJECT_KEY, safe='')}"
-
-    # Headers must be in sorted order for canonical form; host is sent automatically
-    # by urllib but must be included here for signing
-    canonical_headers = (
-        f"cache-control:public, max-age=60\n"
-        f"content-type:application/json\n"
-        f"host:{host}\n"
-        f"x-amz-content-sha256:{payload_hash}\n"
-        f"x-amz-date:{amz_date}\n"
-    )
-    signed_headers = "cache-control;content-type;host;x-amz-content-sha256;x-amz-date"
-
-    canonical_request = "\n".join([
-        "PUT",
-        canonical_uri,
-        "",  # empty query string
-        canonical_headers,
-        signed_headers,
-        payload_hash,
-    ])
-
-    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
-    string_to_sign = "\n".join([
-        "AWS4-HMAC-SHA256",
-        amz_date,
-        credential_scope,
-        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
-    ])
-
-    signing_key = _signing_key(R2_SECRET, date_stamp, region, service)
-    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-
-    authorization = (
-        f"AWS4-HMAC-SHA256 Credential={R2_KEY_ID}/{credential_scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
-    )
-
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="PUT",
-        headers={
-            "Authorization": authorization,
-            "Cache-Control": "public, max-age=60",
-            "Content-Type": "application/json",
-            "x-amz-content-sha256": payload_hash,
-            "x-amz-date": amz_date,
-        },
-    )
-    for attempt in range(1, 4):
-        try:
-            with urllib.request.urlopen(req, timeout=30):
-                return
-        except urllib.error.HTTPError as e:
-            body_text = e.read().decode(errors="replace")
-            print(f"ERROR: R2 upload failed: HTTP {e.code} {e.reason}", file=sys.stderr)
-            if body_text:
-                print(body_text, file=sys.stderr)
-            sys.exit(1)
-        except urllib.error.URLError as e:
-            print(f"WARN: R2 upload attempt {attempt}/3 failed: {e.reason}", file=sys.stderr)
-            if attempt < 3:
-                time.sleep(5)
-    print("ERROR: R2 upload failed after 3 attempts", file=sys.stderr)
-    sys.exit(1)
-
-
 def main():
     print(f"[{datetime.now().isoformat()}] Starting export...")
     data = query_db(DB_PATH)
@@ -227,7 +121,12 @@ def main():
     print(f"  Months in stats:     {len(data['monthly'])}")
     write_json(data, TMP_PATH, OUTPUT_PATH)
     print(f"  JSON written to {OUTPUT_PATH}")
-    upload_to_r2(OUTPUT_PATH)
+    upload_to_r2(
+        OUTPUT_PATH,
+        R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, R2_OBJECT_KEY,
+        content_type="application/json",
+        extra_headers={"cache-control": "public, max-age=60"},
+    )
     print(f"  Uploaded to R2: s3://{R2_BUCKET}/{R2_OBJECT_KEY}")
     print(f"[{datetime.now().isoformat()}] Done.")
 
