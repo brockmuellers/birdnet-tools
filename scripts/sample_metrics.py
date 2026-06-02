@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -24,7 +25,8 @@ HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
 METRICS_STATE_FILE = REPO_DIR / ".sample_metrics_state.json"
 TEMP_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
-_SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats", "caddy", "ssh"]
+_SYSTEMCTL_SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats"]
+_TCP_SERVICES = {"ssh": ("127.0.0.1", 22), "caddy": ("127.0.0.1", 80)}
 _LOCK_FH = None
 
 
@@ -57,6 +59,14 @@ def _read_diskstats(device: str) -> tuple[int, int] | None:
     except OSError:
         pass
     return None
+
+
+def _tcp_check(host: str, port: int, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _acquire_lock() -> None:
@@ -188,17 +198,23 @@ def main():
     # Service health checks
     try:
         result = subprocess.run(
-            ["systemctl", "is-active"] + _SERVICES,
+            ["systemctl", "is-active"] + _SYSTEMCTL_SERVICES,
             capture_output=True, text=True,
         )
         statuses = result.stdout.strip().splitlines()
-        for svc, status in zip(_SERVICES, statuses):
+        for svc, status in zip(_SYSTEMCTL_SERVICES, statuses):
             if status != "active":
                 msg = f"Service {svc} is {status}"
                 _append_event(HEALTH_EVENTS, {"ts": now, "level": "ERROR", "source": "services", "msg": msg})
                 logging.error("%s", msg)
     except Exception as e:
         logging.error("Cannot check service status: %s", e)
+
+    for svc, (host, port) in _TCP_SERVICES.items():
+        if not _tcp_check(host, port):
+            msg = f"Service {svc} not reachable on port {port}"
+            _append_event(HEALTH_EVENTS, {"ts": now, "level": "ERROR", "source": "services", "msg": msg})
+            logging.error("%s", msg)
 
 
 if __name__ == "__main__":
