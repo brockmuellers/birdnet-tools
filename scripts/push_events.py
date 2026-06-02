@@ -17,7 +17,6 @@ import json
 import os
 import re
 import socket
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -232,16 +231,11 @@ def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, lat
     if disks:
         snapshot["disk"] = disks
 
-    # Last detection timestamp and DB size
+    # DB size
     if db_path and Path(db_path).exists():
         try:
-            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5) as conn:
-                row = conn.execute(
-                    "SELECT Date || 'T' || Time FROM detections ORDER BY Date DESC, Time DESC LIMIT 1"
-                ).fetchone()
-            snapshot["last_detection_at"] = row[0] if row else None
             snapshot["db_size_mb"] = round(Path(db_path).stat().st_size / 1024 ** 2, 2)
-        except Exception:
+        except OSError:
             pass
 
     # System uptime
@@ -254,25 +248,6 @@ def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, lat
     for key in ("temp_c", "memory_available_mb", "wifi_signal_dbm"):
         if key in latest_sample:
             snapshot[key] = latest_sample[key]
-
-    # Network: interface states + primary outbound IP
-    interfaces: dict = {}
-    net_root = Path("/sys/class/net")
-    if net_root.exists():
-        for iface_path in sorted(net_root.iterdir()):
-            name = iface_path.name
-            if name == "lo":
-                continue
-            if "/virtual/" in str(iface_path.resolve()):
-                continue
-            try:
-                state = (iface_path / "operstate").read_text().strip()
-                interfaces[name] = {"state": state}
-            except OSError:
-                pass
-
-    if interfaces:
-        snapshot["interfaces"] = interfaces
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

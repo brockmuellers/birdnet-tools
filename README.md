@@ -239,13 +239,11 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
   "health": {
     "last_successful_upload_at": "...",
     "disk": {"/": {"used_pct": 42.1, "free_gb": 12.3}},
-    "last_detection_at": "2026-06-01T11:58:00",
     "db_size_mb": 87.4,
     "uptime_seconds": 123456,
     "temp_c": 51.2,
     "memory_available_mb": 612.0,
     "wifi_signal_dbm": -58,
-    "interfaces": {"wlan0": {"state": "up"}},
     "primary_ip": "192.168.1.42"
   },
   "events": [
