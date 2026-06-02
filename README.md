@@ -290,3 +290,25 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
    ```
 
 Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
+
+---
+
+### refresh_species_freq.py
+
+Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week of year and your configured lat/lon, then writes `.species_freq_cache.json` at the repo root. The cache lists every species with a non-zero frequency score for your region this week.
+
+`push_events.py` reads this cache to suppress frequency-exclusion events for species that score exactly `0.0` — birds that would never be expected in your region and whose exclusions add no signal to the event log. If the cache is absent or unreadable, `push_events.py` falls back to recording all exclusions (same behavior as before this script existed).
+
+Frequencies are scored per ISO week of year, so the cache is refreshed every Monday at 1am to stay in sync with the model's seasonal scores.
+
+#### Prerequisites
+
+- BirdNET-Pi installed at `~/BirdNET-Pi` (uses its Python venv and metadata model)
+
+#### Usage
+
+```
+scripts/refresh_species_freq.py
+```
+
+Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).

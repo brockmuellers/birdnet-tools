@@ -34,6 +34,7 @@ BIRDNET_EVENTS = REPO_DIR / "birdnet_events.jsonl"
 CRON_EVENTS = REPO_DIR / "cron_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
 STATE_FILE = REPO_DIR / ".health_state.json"
+SPECIES_FREQ_CACHE = REPO_DIR / ".species_freq_cache.json"
 _LOCK_FH = None
 
 EXCLUSION_MARKER = "Excluded as below Species Occurrence Frequency Threshold: "
@@ -47,6 +48,30 @@ _TS_RE = re.compile(
 # Matches WARN: or ERROR: anywhere in a line (word-boundary anchored to avoid
 # matching substrings like "ValueError:").
 _LEVEL_RE = re.compile(r"\b(WARN|ERROR):\s*(.*)")
+
+
+def _load_nonzero_species() -> frozenset[str] | None:
+    """Load the set of species with frequency > 0 from the weekly cache.
+
+    Returns None (fail-open) if the cache is absent or unreadable, so that
+    all exclusions are recorded rather than silently dropped.
+    """
+    if not SPECIES_FREQ_CACHE.exists():
+        logging.warning(
+            "Species frequency cache not found (%s); all exclusions will be recorded. "
+            "Run refresh_species_freq.py to generate it.",
+            SPECIES_FREQ_CACHE,
+        )
+        return None
+    try:
+        data = json.loads(SPECIES_FREQ_CACHE.read_text(encoding="utf-8"))
+        return frozenset(data["nonzero_species"])
+    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        logging.warning(
+            "Could not read species frequency cache (%s); all exclusions will be recorded",
+            exc,
+        )
+        return None
 
 
 def _acquire_lock() -> None:
@@ -136,7 +161,11 @@ def _parse_ts(ts_str: str) -> str:
         return datetime.now(timezone.utc).isoformat()
 
 
-def collect_journal_events(state: dict, retain_days: int) -> tuple[list[dict], str | None]:
+def collect_journal_events(
+    state: dict,
+    retain_days: int,
+    nonzero_species: frozenset[str] | None = None,
+) -> tuple[list[dict], str | None]:
     """Collect new birdnet_analysis journal events since the last cursor."""
     cursor = state.get("journal_cursor")
     cmd = ["journalctl", "-u", "birdnet_analysis", "--output=json", "--no-pager"]
@@ -173,6 +202,8 @@ def collect_journal_events(state: dict, retain_days: int) -> tuple[list[dict], s
             if len(words) >= 3:
                 sci_name = " ".join(words[:2])
                 com_name = " ".join(words[2:])
+                if nonzero_species is not None and f"{sci_name}_{com_name}" not in nonzero_species:
+                    continue
                 event_msg = f"Excluded: {com_name} ({sci_name})"
             else:
                 event_msg = f"Excluded: {msg[idx:].strip()}"
@@ -366,8 +397,10 @@ def main():
         _append_events(HEALTH_EVENTS, ip_events)
         logging.info("%d IP change event(s): %s", len(ip_events), ip_events[0]["msg"])
 
+    nonzero_species = _load_nonzero_species()
+
     logging.info("Collecting journal events...")
-    journal_events, new_cursor = collect_journal_events(state, RETAIN_DAYS)
+    journal_events, new_cursor = collect_journal_events(state, RETAIN_DAYS, nonzero_species)
     if journal_events:
         _append_events(BIRDNET_EVENTS, journal_events)
         logging.info("%d new birdnet event(s)", len(journal_events))

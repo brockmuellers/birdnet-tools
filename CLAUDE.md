@@ -16,8 +16,9 @@ Currently, this repository:
 	- Nightly: copies `birds.db` via SQLite's online backup API (safe under concurrent writes), retaining the last N days
 	- Weekly: wraps BirdNET-Pi's `backup_data.sh` to produce a full tar of config + DB + audio clips + spectrograms; pauses BirdNET-Pi services during the run
 - Backs up `birds.db` to Cloudflare R2 nightly (`scripts/backup_db_r2.py`). Aborts with an error if the DB exceeds a configurable size ceiling; warns at 80% of that ceiling. Uses SQLite's online backup API for a safe snapshot, then uploads via SigV4.
+- Refreshes the species frequency cache weekly (`scripts/refresh_species_freq.py`). Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week and location; writes `.species_freq_cache.json` listing species with frequency > 0. Used by `push_events.py` to suppress exclusion events for zero-frequency species.
 - Aggregates events and pushes them to Cloudflare R2 every 15 minutes (`scripts/push_events.py`). Sources:
-	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
+	- `birdnet_analysis` systemd journal: species frequency exclusions with non-zero frequency (INFO) and errors (ERROR); exclusions for species with a `0.0` frequency score (birds not expected in this region) are suppressed using `.species_freq_cache.json`
 	- `logs/export.log` / `logs/backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `logs/failures.log`: non-zero exit codes captured by `run_cron.sh`
 	- `health_events.jsonl`: WARN/ERROR lines from `logs/health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`; WARN when `primary_ip` changes between runs (indicates DHCP reassignment that breaks `.local` mDNS resolution)
@@ -33,6 +34,7 @@ scripts/run_backup.sh --db                     # nightly DB backup (test before 
 scripts/run_backup.sh --full                   # weekly full backup (pauses BirdNET-Pi services)
 scripts/sample_metrics.py                      # manual test run for metric sampling; reads .env automatically
 scripts/push_events.py                         # manual test run for event push; reads .env automatically
+scripts/refresh_species_freq.py                # refresh species frequency cache (weekly; uses BirdNET-Pi venv)
 python3 scripts/excluded_detections.py         # show frequency-excluded detections (last 7 days)
 python3 scripts/excluded_detections.py --days 14
 ```
@@ -96,5 +98,6 @@ REPO=/home/sara/repos/birdnet-tools
 0 3 * * 0   $REPO/scripts/run_cron.sh full-backup   timeout 2h  $REPO/scripts/run_backup.sh --full          >> $REPO/logs/backup.log  2>&1
 30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py               >> $REPO/logs/backup.log  2>&1
 */5 * * * * $REPO/scripts/run_cron.sh metrics       timeout 30  $REPO/scripts/sample_metrics.py            >> $REPO/logs/health.log  2>&1
-*/15 * * * * $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py               >> $REPO/logs/health.log  2>&1
+*/15 * * * * $REPO/scripts/run_cron.sh push-events    timeout 10m $REPO/scripts/push_events.py               >> $REPO/logs/health.log  2>&1
+0 1 * * 1    $REPO/scripts/run_cron.sh species-freq  timeout 5m  $REPO/scripts/refresh_species_freq.py         >> $REPO/logs/health.log  2>&1
 ```
