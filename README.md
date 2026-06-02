@@ -184,6 +184,7 @@ Samples system metrics every 5 minutes and appends a record to `metric_samples.j
 - `wifi_signal_dbm` — WiFi signal strength (first wireless interface)
 - `disk_root_used_pct`, `disk_root_free_gb` — root filesystem usage
 - `disk_backup_used_pct`, `disk_backup_free_gb` — backup mount usage (only when `BACKUP_DEST` is set and on a different device than `/`)
+- `disk_io_read_mb`, `disk_io_write_mb` — MB read/written on the root device since the previous sample (delta between consecutive `/proc/diskstats` readings; absent on the first run after a restart)
 
 **Events written to `health_events.jsonl`:**
 - `WARN` if chip temperature exceeds `TEMP_WARN_C` (default 70°C)
@@ -257,10 +258,10 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
     {"ts": "...", "level": "WARN",  "source": "network",   "msg": "primary_ip changed from 192.168.1.42 to 192.168.1.55 — mDNS hostname (.local) may no longer resolve correctly"}
   ],
   "metric_windows": [
-    {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "wifi_signal_dbm": {"min": -65, "max": -55, "avg": -60.0}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "disk_root_free_gb": {"min": 12.1, "max": 12.3, "avg": 12.2}}
+    {"window_start": "2026-06-01T11:00:00+00:00", "disk_io_read_mb": {"min": 0.5, "max": 3.2, "avg": 1.4}, "disk_io_write_mb": {"min": 0.1, "max": 1.8, "avg": 0.6}, "disk_root_free_gb": {"min": 12.1, "max": 12.3, "avg": 12.2}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "wifi_signal_dbm": {"min": -65, "max": -55, "avg": -60.0}}
   ],
-  "last_hour": {"temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "wifi_signal_dbm": {"min": -65, "max": -55, "avg": -60.0}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}},
-  "last_day":  {"temp_c": {"min": 46.0, "max": 61.2, "avg": 52.1}, "memory_available_mb": {"min": 420.0, "max": 680.0, "avg": 595.0}, "wifi_signal_dbm": {"min": -72, "max": -52, "avg": -61.0}, "disk_root_used_pct": {"min": 41.5, "max": 42.1, "avg": 41.8}}
+  "last_hour": {"disk_io_read_mb": {"min": 0.5, "max": 3.2, "avg": 1.4}, "disk_io_write_mb": {"min": 0.1, "max": 1.8, "avg": 0.6}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "wifi_signal_dbm": {"min": -65, "max": -55, "avg": -60.0}},
+  "last_day":  {"disk_io_read_mb": {"min": 0.2, "max": 8.1, "avg": 1.6}, "disk_io_write_mb": {"min": 0.0, "max": 5.4, "avg": 0.7}, "disk_root_used_pct": {"min": 41.5, "max": 42.1, "avg": 41.8}, "memory_available_mb": {"min": 420.0, "max": 680.0, "avg": 595.0}, "temp_c": {"min": 46.0, "max": 61.2, "avg": 52.1}, "wifi_signal_dbm": {"min": -72, "max": -52, "avg": -61.0}}
 }
 ```
 

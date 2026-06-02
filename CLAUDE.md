@@ -22,7 +22,7 @@ Currently, this repository:
 	- `logs/export.log` / `logs/backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `logs/failures.log`: non-zero exit codes captured by `run_cron.sh`
 	- `health_events.jsonl`: WARN/ERROR lines from `logs/health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`; WARN when `primary_ip` changes between runs (indicates DHCP reassignment that breaks `.local` mDNS resolution)
-	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`, `disk_root_used_pct`, `disk_root_free_gb`, `disk_backup_used_pct`, `disk_backup_free_gb`
+	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`, `disk_root_used_pct`, `disk_root_free_gb`, `disk_backup_used_pct`, `disk_backup_free_gb`, `disk_io_read_mb`, `disk_io_write_mb` (MB read/written on the root device since the previous sample; absent on first run)
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
 ## Running

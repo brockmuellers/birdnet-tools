@@ -9,6 +9,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,9 +22,41 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-sample-metrics.lock")
 HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
+METRICS_STATE_FILE = REPO_DIR / ".sample_metrics_state.json"
 TEMP_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
 _SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats", "caddy", "ssh"]
 _LOCK_FH = None
+
+
+def _root_block_device() -> str | None:
+    """Return the kernel device name (e.g. mmcblk0, sda) backing the root filesystem."""
+    try:
+        for line in Path("/proc/mounts").read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) < 2 or parts[1] != "/" or not parts[0].startswith("/dev/"):
+                continue
+            name = parts[0][5:]  # strip /dev/
+            # mmcblkNpM, nvmeNnXpM -> strip pM to get device name
+            stripped = re.sub(r"p\d+$", "", name)
+            if stripped != name:
+                return stripped
+            # sdXN, vdXN -> strip trailing partition number
+            return re.sub(r"\d+$", "", name) or name
+    except OSError:
+        pass
+    return None
+
+
+def _read_diskstats(device: str) -> tuple[int, int] | None:
+    """Return (sectors_read, sectors_written) for `device` from /proc/diskstats."""
+    try:
+        for line in Path("/proc/diskstats").read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) >= 10 and parts[2] == device:
+                return int(parts[5]), int(parts[9])
+    except OSError:
+        pass
+    return None
 
 
 def _acquire_lock() -> None:
@@ -117,6 +150,37 @@ def main():
                 sample["disk_backup_free_gb"] = free_gb
         except OSError:
             pass
+
+    # Disk I/O delta (MB read/written since last sample)
+    try:
+        mstate: dict = {}
+        if METRICS_STATE_FILE.exists():
+            mstate = json.loads(METRICS_STATE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        mstate = {}
+
+    root_dev = _root_block_device()
+    cur_io = _read_diskstats(root_dev) if root_dev else None
+    if cur_io is not None:
+        prev_io = mstate.get("diskstats")
+        if (
+            prev_io and len(prev_io) == 2
+            and mstate.get("device") == root_dev
+        ):
+            _SECTORS_PER_MB = 2048  # 512 bytes/sector
+            read_mb = round((cur_io[0] - prev_io[0]) / _SECTORS_PER_MB, 2)
+            write_mb = round((cur_io[1] - prev_io[1]) / _SECTORS_PER_MB, 2)
+            if read_mb >= 0 and write_mb >= 0:
+                sample["disk_io_read_mb"] = read_mb
+                sample["disk_io_write_mb"] = write_mb
+
+        try:
+            new_mstate = {"device": root_dev, "diskstats": list(cur_io)}
+            tmp = METRICS_STATE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(new_mstate), encoding="utf-8")
+            os.replace(tmp, METRICS_STATE_FILE)
+        except OSError as e:
+            logging.warning("Could not save disk I/O state: %s", e)
 
     _append_event(METRIC_SAMPLES, sample)
     logging.info("sample written (%s)", ", ".join(f"{k}={v}" for k, v in sample.items() if k != "ts"))
