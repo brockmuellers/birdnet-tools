@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample chip temperature and append to health_events.jsonl."""
+"""Sample chip temperature; append metric sample to metric_samples.jsonl and WARN events to health_events.jsonl."""
 import fcntl
 import json
 import os
@@ -12,6 +12,7 @@ from _r2 import load_env
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-sample-temp.lock")
 HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
+METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
 TEMP_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
 _LOCK_FH = None
 
@@ -46,14 +47,15 @@ def main():
         sys.exit(1)
 
     now = datetime.now(timezone.utc).isoformat()
-    level = "WARN" if temp_c >= warn_c else "INFO"
-    msg = f"{temp_c:.1f}°C"
-    if level == "WARN":
-        msg += f" (exceeds threshold {warn_c:.0f}°C)"
 
-    event = {"ts": now, "level": level, "source": "temp", "msg": msg}
-    _append_event(HEALTH_EVENTS, event)
-    print(f"[{datetime.now().isoformat()}] {level}: {msg}")
+    _append_event(METRIC_SAMPLES, {"ts": now, "temp_c": round(temp_c, 1)})
+
+    if temp_c >= warn_c:
+        msg = f"{temp_c:.1f}°C (exceeds threshold {warn_c:.0f}°C)"
+        _append_event(HEALTH_EVENTS, {"ts": now, "level": "WARN", "source": "temp", "msg": msg})
+        print(f"[{datetime.now().isoformat()}] WARN: {msg}")
+    else:
+        print(f"[{datetime.now().isoformat()}] INFO: {temp_c:.1f}°C")
 
 
 if __name__ == "__main__":

@@ -20,8 +20,9 @@ Currently, this repository:
 	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
 	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
-	- `health_events.jsonl`: chip temperature samples from `scripts/sample_temp.py` (every 5 min) and WARN/ERROR lines from `health.log`
-	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl` (export/backup/failures logs), pruned to `EVENT_LOG_RETAIN_DAYS`, then merged by timestamp and uploaded as a single JSON to R2.
+	- `health_events.jsonl`: WARN/ERROR lines from `health.log` and temp threshold WARN events from `scripts/sample_temp.py`
+	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_temp.py` (every 5 min); future samplers add keys to the same records
+	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
 ## Running
 

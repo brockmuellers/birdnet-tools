@@ -5,10 +5,12 @@ Sources:
 - birdnet_analysis systemd journal: species frequency exclusions (INFO) and errors (ERROR)
 - export.log / backup.log: WARN and ERROR lines from cron job scripts
 - failures.log: non-zero exit codes captured by run_cron.sh
-- health_events.jsonl: temperature samples written by sample_temp.py
+- health_events.jsonl: WARN/ERROR events from health.log and temp threshold events
+- metric_samples.jsonl: periodic numeric samples written by sample_temp.py (and future samplers)
 
-Events are stored locally in birdnet_events.jsonl and health_events.jsonl,
+Events are stored locally in birdnet_events.jsonl, health_events.jsonl, and cron_events.jsonl,
 pruned to EVENT_LOG_RETAIN_DAYS, merged by timestamp, and uploaded to R2.
+Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as metric_windows.
 """
 import fcntl
 import json
@@ -30,6 +32,7 @@ LOCK_FILE = Path("/tmp/birdnet-push-events.lock")
 HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 BIRDNET_EVENTS = REPO_DIR / "birdnet_events.jsonl"
 CRON_EVENTS = REPO_DIR / "cron_events.jsonl"
+METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
 STATE_FILE = REPO_DIR / ".health_state.json"
 _LOCK_FH = None
 
@@ -331,6 +334,33 @@ def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_u
     return snapshot
 
 
+def aggregate_metric_windows(samples: list[dict]) -> list[dict]:
+    """Bucket metric samples into hourly windows, computing min/max/avg per numeric key."""
+    buckets: dict[str, dict[str, list[float]]] = {}
+    for sample in samples:
+        ts = sample.get("ts", "")
+        if len(ts) < 13:
+            continue
+        window = ts[:13] + ":00:00" + ts[19:]  # truncate to hour
+        bucket = buckets.setdefault(window, {})
+        for key, val in sample.items():
+            if key == "ts" or not isinstance(val, (int, float)):
+                continue
+            bucket.setdefault(key, []).append(float(val))
+
+    windows = []
+    for window_start, metrics in sorted(buckets.items()):
+        entry: dict = {"window_start": window_start}
+        for key, vals in sorted(metrics.items()):
+            entry[key] = {
+                "min": round(min(vals), 2),
+                "max": round(max(vals), 2),
+                "avg": round(sum(vals) / len(vals), 2),
+            }
+        windows.append(entry)
+    return windows
+
+
 def main():
     load_env(REPO_DIR / ".env")
     _acquire_lock()
@@ -374,6 +404,7 @@ def main():
     _prune_events(HEALTH_EVENTS, RETAIN_DAYS)
     _prune_events(BIRDNET_EVENTS, RETAIN_DAYS)
     _prune_events(CRON_EVENTS, RETAIN_DAYS)
+    _prune_events(METRIC_SAMPLES, RETAIN_DAYS)
 
     print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
     health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"))
@@ -384,11 +415,15 @@ def main():
     cron = _load_events(CRON_EVENTS)
     all_events = sorted(health + birdnet + cron, key=lambda e: e.get("ts", ""), reverse=True)
 
+    metric_samples = _load_events(METRIC_SAMPLES)
+    metric_windows = aggregate_metric_windows(metric_samples)
+
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": local_timezone_name(),
         "health": health_snapshot,
         "events": all_events,
+        "metric_windows": metric_windows,
     }
 
     fd, tmp_path_str = tempfile.mkstemp(suffix=".json", prefix="birdnet-events-")
@@ -410,6 +445,7 @@ def main():
 
     print(f"  Uploaded to R2: s3://{R2_BUCKET}/{EVENT_LOG_KEY}")
     print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet, {len(cron)} cron)")
+    print(f"  Metric windows: {len(metric_windows)} ({len(metric_samples)} samples)")
     print(f"[{datetime.now().isoformat()}] Done.")
 
 
