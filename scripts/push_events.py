@@ -29,6 +29,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-push-events.lock")
 HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 BIRDNET_EVENTS = REPO_DIR / "birdnet_events.jsonl"
+CRON_EVENTS = REPO_DIR / "cron_events.jsonl"
 STATE_FILE = REPO_DIR / ".health_state.json"
 _LOCK_FH = None
 
@@ -354,16 +355,16 @@ def main():
         state["journal_cursor"] = new_cursor
 
     print(f"[{datetime.now().isoformat()}] Collecting log file events...")
-    for log_filename, source, state_key in [
-        ("export.log",   "export",  "export_log_offset"),
-        ("backup.log",   "backup",  "backup_log_offset"),
-        ("health.log",   "health",  "health_log_offset"),
-        ("failures.log", "cron",    "failures_log_offset"),
+    for log_filename, source, state_key, dest in [
+        ("export.log",   "export",  "export_log_offset",   CRON_EVENTS),
+        ("backup.log",   "backup",  "backup_log_offset",   CRON_EVENTS),
+        ("health.log",   "health",  "health_log_offset",   HEALTH_EVENTS),
+        ("failures.log", "cron",    "failures_log_offset", CRON_EVENTS),
     ]:
         offset = state.get(state_key, 0)
         events, new_offset = collect_log_events(REPO_DIR / log_filename, source, offset)
         if events:
-            _append_events(HEALTH_EVENTS, events)
+            _append_events(dest, events)
             print(f"  {len(events)} new {source} log event(s)")
         state[state_key] = new_offset
 
@@ -372,6 +373,7 @@ def main():
     print(f"[{datetime.now().isoformat()}] Pruning old events...")
     _prune_events(HEALTH_EVENTS, RETAIN_DAYS)
     _prune_events(BIRDNET_EVENTS, RETAIN_DAYS)
+    _prune_events(CRON_EVENTS, RETAIN_DAYS)
 
     print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
     health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"))
@@ -379,7 +381,8 @@ def main():
     print(f"[{datetime.now().isoformat()}] Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
     birdnet = _load_events(BIRDNET_EVENTS)
-    all_events = sorted(health + birdnet, key=lambda e: e.get("ts", ""), reverse=True)
+    cron = _load_events(CRON_EVENTS)
+    all_events = sorted(health + birdnet + cron, key=lambda e: e.get("ts", ""), reverse=True)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -406,7 +409,7 @@ def main():
     _save_state(state)
 
     print(f"  Uploaded to R2: s3://{R2_BUCKET}/{EVENT_LOG_KEY}")
-    print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet)")
+    print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet, {len(cron)} cron)")
     print(f"[{datetime.now().isoformat()}] Done.")
 
 
