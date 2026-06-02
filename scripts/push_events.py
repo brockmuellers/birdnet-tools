@@ -14,6 +14,8 @@ import fcntl
 import json
 import os
 import re
+import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -208,6 +210,126 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
     return events, new_offset
 
 
+_HEALTH_SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats", "caddy", "ssh"]
+
+
+def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_upload_at: str | None) -> dict:
+    snapshot: dict = {}
+
+    if last_upload_at is not None:
+        snapshot["last_successful_upload_at"] = last_upload_at
+
+    # Service status
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active"] + _HEALTH_SERVICES,
+            capture_output=True, text=True,
+        )
+        statuses = result.stdout.strip().splitlines()
+        snapshot["services"] = dict(zip(_HEALTH_SERVICES, statuses))
+    except Exception:
+        pass
+
+    # Disk usage: always include /, add BACKUP_DEST if it's a different filesystem
+    def _disk_stat(path: str) -> dict:
+        st = os.statvfs(path)
+        used = (st.f_blocks - st.f_bfree) * st.f_frsize
+        avail = st.f_bavail * st.f_frsize
+        used_pct = round(used / (used + avail) * 100, 1) if (used + avail) else 0
+        return {"used_pct": used_pct, "free_gb": round(avail / 1024 ** 3, 2)}
+
+    disks: dict = {}
+    try:
+        disks["/"] = _disk_stat("/")
+    except OSError:
+        pass
+    if backup_dest:
+        try:
+            if os.stat(backup_dest).st_dev != os.stat("/").st_dev:
+                disks[backup_dest] = _disk_stat(backup_dest)
+        except OSError:
+            pass
+    if disks:
+        snapshot["disk"] = disks
+
+    # Last detection timestamp and DB size
+    if db_path and Path(db_path).exists():
+        try:
+            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5) as conn:
+                row = conn.execute(
+                    "SELECT Date || 'T' || Time FROM detections ORDER BY Date DESC, Time DESC LIMIT 1"
+                ).fetchone()
+            snapshot["last_detection_at"] = row[0] if row else None
+            snapshot["db_size_mb"] = round(Path(db_path).stat().st_size / 1024 ** 2, 2)
+        except Exception:
+            pass
+
+    # Chip temperature
+    try:
+        temp_c = int(Path("/sys/class/thermal/thermal_zone0/temp").read_text().strip()) / 1000
+        snapshot["temp_c"] = round(temp_c, 1)
+    except OSError:
+        pass
+
+    # System uptime
+    try:
+        snapshot["uptime_seconds"] = int(float(Path("/proc/uptime").read_text().split()[0]))
+    except OSError:
+        pass
+
+    # Available memory
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                snapshot["memory_available_mb"] = round(int(line.split()[1]) / 1024, 1)
+                break
+    except (OSError, ValueError):
+        pass
+
+    # Network: interface states + WiFi signal + primary outbound IP
+    interfaces: dict = {}
+    net_root = Path("/sys/class/net")
+    if net_root.exists():
+        for iface_path in sorted(net_root.iterdir()):
+            name = iface_path.name
+            if name == "lo":
+                continue
+            if "/virtual/" in str(iface_path.resolve()):
+                continue
+            try:
+                state = (iface_path / "operstate").read_text().strip()
+                interfaces[name] = {"state": state}
+            except OSError:
+                pass
+
+    try:
+        for line in Path("/proc/net/wireless").read_text().splitlines()[2:]:
+            parts = line.split()
+            if len(parts) >= 4:
+                name = parts[0].rstrip(":")
+                if name in interfaces:
+                    try:
+                        interfaces[name]["signal_dbm"] = int(float(parts[3].rstrip(".")))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+
+    if interfaces:
+        snapshot["interfaces"] = interfaces
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1)
+        s.connect(("8.8.8.8", 80))
+        snapshot["primary_ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    return snapshot
+
+
 def main():
     load_env(REPO_DIR / ".env")
     _acquire_lock()
@@ -218,6 +340,8 @@ def main():
     R2_BUCKET = os.environ["R2_BUCKET"]
     EVENT_LOG_KEY = os.environ.get("EVENT_LOG_OBJECT_KEY", "birdnet-events.json")
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))
+    DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
+    BACKUP_DEST = os.environ.get("BACKUP_DEST")
 
     state = _load_state()
 
@@ -249,6 +373,9 @@ def main():
     _prune_events(HEALTH_EVENTS, RETAIN_DAYS)
     _prune_events(BIRDNET_EVENTS, RETAIN_DAYS)
 
+    print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
+    health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"))
+
     print(f"[{datetime.now().isoformat()}] Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
     birdnet = _load_events(BIRDNET_EVENTS)
@@ -257,6 +384,7 @@ def main():
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": local_timezone_name(),
+        "health": health_snapshot,
         "events": all_events,
     }
 
@@ -273,6 +401,9 @@ def main():
         )
     finally:
         tmp_path.unlink(missing_ok=True)
+
+    state["last_successful_upload_at"] = datetime.now(timezone.utc).isoformat()
+    _save_state(state)
 
     print(f"  Uploaded to R2: s3://{R2_BUCKET}/{EVENT_LOG_KEY}")
     print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet)")
