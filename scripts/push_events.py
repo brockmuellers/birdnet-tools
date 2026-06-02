@@ -286,6 +286,27 @@ def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, lat
     return snapshot
 
 
+def summarize_metric_period(samples: list[dict], hours: int) -> dict:
+    """Aggregate all numeric metric keys across samples within the last `hours` hours."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    buckets: dict[str, list[float]] = {}
+    for sample in samples:
+        if sample.get("ts", "") < cutoff:
+            continue
+        for key, val in sample.items():
+            if key == "ts" or not isinstance(val, (int, float)):
+                continue
+            buckets.setdefault(key, []).append(float(val))
+    return {
+        key: {
+            "min": round(min(vals), 2),
+            "max": round(max(vals), 2),
+            "avg": round(sum(vals) / len(vals), 2),
+        }
+        for key, vals in sorted(buckets.items())
+    }
+
+
 def aggregate_metric_windows(samples: list[dict]) -> list[dict]:
     """Bucket metric samples into hourly windows, computing min/max/avg per numeric key."""
     buckets: dict[str, dict[str, list[float]]] = {}
@@ -381,6 +402,8 @@ def main():
         })
 
     metric_windows = aggregate_metric_windows(metric_samples)
+    last_hour = summarize_metric_period(metric_samples, 1)
+    last_day = summarize_metric_period(metric_samples, 24)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -388,6 +411,8 @@ def main():
         "health": health_snapshot,
         "events": all_events,
         "metric_windows": metric_windows,
+        "last_hour": last_hour,
+        "last_day": last_day,
     }
 
     fd, tmp_path_str = tempfile.mkstemp(suffix=".json", prefix="birdnet-events-")
@@ -409,7 +434,7 @@ def main():
 
     print(f"  Uploaded to R2: s3://{R2_BUCKET}/{EVENT_LOG_KEY}")
     print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet, {len(cron)} cron)")
-    print(f"  Metric windows: {len(metric_windows)} ({len(metric_samples)} samples)")
+    print(f"  Metric windows: {len(metric_windows)} ({len(metric_samples)} samples); last_hour: {len(last_hour)} keys, last_day: {len(last_day)} keys")
     print(f"[{datetime.now().isoformat()}] Done.")
 
 

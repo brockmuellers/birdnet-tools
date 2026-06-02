@@ -256,7 +256,9 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
   ],
   "metric_windows": [
     {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "disk_root_free_gb": {"min": 12.1, "max": 12.3, "avg": 12.2}}
-  ]
+  ],
+  "last_hour": {"temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}},
+  "last_day":  {"temp_c": {"min": 46.0, "max": 61.2, "avg": 52.1}, "memory_available_mb": {"min": 420.0, "max": 680.0, "avg": 595.0}, "disk_root_used_pct": {"min": 41.5, "max": 42.1, "avg": 41.8}}
 }
 ```
 
