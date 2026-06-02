@@ -180,6 +180,8 @@ Samples system metrics every 5 minutes and appends a record to `metric_samples.j
 - `temp_c` — chip temperature
 - `memory_available_mb` — available RAM
 - `wifi_signal_dbm` — WiFi signal strength (first wireless interface)
+- `disk_root_used_pct`, `disk_root_free_gb` — root filesystem usage
+- `disk_backup_used_pct`, `disk_backup_free_gb` — backup mount usage (only when `BACKUP_DEST` is set and on a different device than `/`)
 
 **Events written to `health_events.jsonl`:**
 - `WARN` if chip temperature exceeds `TEMP_WARN_C` (default 70°C)
@@ -253,7 +255,7 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
     {"ts": "...", "level": "ERROR", "source": "services",  "msg": "Service birdnet_analysis is inactive"}
   ],
   "metric_windows": [
-    {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}}
+    {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "disk_root_free_gb": {"min": 12.1, "max": 12.3, "avg": 12.2}}
   ]
 }
 ```

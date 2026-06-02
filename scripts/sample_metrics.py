@@ -90,6 +90,31 @@ def main():
     except OSError:
         pass
 
+    # Disk usage
+    def _disk_stat(path: str) -> tuple[float, float]:
+        st = os.statvfs(path)
+        used = (st.f_blocks - st.f_bfree) * st.f_frsize
+        avail = st.f_bavail * st.f_frsize
+        used_pct = round(used / (used + avail) * 100, 1) if (used + avail) else 0.0
+        return used_pct, round(avail / 1024 ** 3, 2)
+
+    try:
+        used_pct, free_gb = _disk_stat("/")
+        sample["disk_root_used_pct"] = used_pct
+        sample["disk_root_free_gb"] = free_gb
+    except OSError:
+        pass
+
+    backup_dest = os.environ.get("BACKUP_DEST")
+    if backup_dest:
+        try:
+            if os.stat(backup_dest).st_dev != os.stat("/").st_dev:
+                used_pct, free_gb = _disk_stat(backup_dest)
+                sample["disk_backup_used_pct"] = used_pct
+                sample["disk_backup_free_gb"] = free_gb
+        except OSError:
+            pass
+
     _append_event(METRIC_SAMPLES, sample)
     print(f"[{datetime.now().isoformat()}] INFO: sample written ({', '.join(f'{k}={v}' for k, v in sample.items() if k != 'ts')})")
 

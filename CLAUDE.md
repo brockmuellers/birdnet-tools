@@ -21,7 +21,7 @@ Currently, this repository:
 	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
 	- `health_events.jsonl`: WARN/ERROR lines from `health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`
-	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`
+	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`, `disk_root_used_pct`, `disk_root_free_gb`, `disk_backup_used_pct`, `disk_backup_free_gb`
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
 ## Running

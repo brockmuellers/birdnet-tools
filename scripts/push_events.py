@@ -214,7 +214,7 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
     return events, new_offset
 
 
-def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_upload_at: str | None, latest_sample: dict | None = None) -> dict:
+def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, latest_sample: dict | None = None) -> dict:
     snapshot: dict = {}
     if latest_sample is None:
         latest_sample = {}
@@ -222,25 +222,13 @@ def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_u
     if last_upload_at is not None:
         snapshot["last_successful_upload_at"] = last_upload_at
 
-    # Disk usage: always include /, add BACKUP_DEST if it's a different filesystem
-    def _disk_stat(path: str) -> dict:
-        st = os.statvfs(path)
-        used = (st.f_blocks - st.f_bfree) * st.f_frsize
-        avail = st.f_bavail * st.f_frsize
-        used_pct = round(used / (used + avail) * 100, 1) if (used + avail) else 0
-        return {"used_pct": used_pct, "free_gb": round(avail / 1024 ** 3, 2)}
-
+    # Disk usage from latest metric sample written by sample_metrics.py
     disks: dict = {}
-    try:
-        disks["/"] = _disk_stat("/")
-    except OSError:
-        pass
-    if backup_dest:
-        try:
-            if os.stat(backup_dest).st_dev != os.stat("/").st_dev:
-                disks[backup_dest] = _disk_stat(backup_dest)
-        except OSError:
-            pass
+    if "disk_root_used_pct" in latest_sample:
+        disks["/"] = {"used_pct": latest_sample["disk_root_used_pct"], "free_gb": latest_sample.get("disk_root_free_gb")}
+    if "disk_backup_used_pct" in latest_sample:
+        backup_dest = os.environ.get("BACKUP_DEST", "backup")
+        disks[backup_dest] = {"used_pct": latest_sample["disk_backup_used_pct"], "free_gb": latest_sample.get("disk_backup_free_gb")}
     if disks:
         snapshot["disk"] = disks
 
@@ -336,7 +324,6 @@ def main():
     EVENT_LOG_KEY = os.environ.get("EVENT_LOG_OBJECT_KEY", "birdnet-events.json")
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
-    BACKUP_DEST = os.environ.get("BACKUP_DEST")
 
     state = _load_state()
 
@@ -373,7 +360,7 @@ def main():
     print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
     metric_samples = _load_events(METRIC_SAMPLES)
     latest_sample = max(metric_samples, key=lambda s: s.get("ts", ""), default={})
-    health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"), latest_sample)
+    health_snapshot = collect_health_snapshot(DB_PATH, state.get("last_successful_upload_at"), latest_sample)
 
     print(f"[{datetime.now().isoformat()}] Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
