@@ -38,6 +38,8 @@ SPECIES_FREQ_CACHE = REPO_DIR / ".species_freq_cache.json"
 _LOCK_FH = None
 
 EXCLUSION_MARKER = "Excluded as below Species Occurrence Frequency Threshold: "
+# Non-bird sounds aggregated into a single count event rather than individual exclusion events
+NON_BIRD_SPECIES = ["Fireworks", "Engine", "Dog", "Siren"]
 
 # Matches bracketed timestamps [2026-06-01T12:34:56...] or [2026-06-01 12:34:56]
 # and bare ISO timestamps 2026-06-01T12:34:56... at the start of a line.
@@ -181,6 +183,7 @@ def collect_journal_events(
 
     events: list[dict] = []
     new_cursor: str | None = None
+    non_bird_counts: dict[str, int] = {name: 0 for name in NON_BIRD_SPECIES}
     for line in result.stdout.splitlines():
         try:
             obj = json.loads(line)
@@ -204,15 +207,32 @@ def collect_journal_events(
             if len(words) >= 3:
                 sci_name = " ".join(words[:2])
                 com_name = " ".join(words[2:])
+                if com_name in non_bird_counts:
+                    non_bird_counts[com_name] += 1
+                    continue
                 if nonzero_species is not None and f"{sci_name}_{com_name}" not in nonzero_species:
                     continue
                 event_msg = f"Excluded: {com_name} ({sci_name})"
             else:
+                # Non-bird sounds have a 1-word sci name == com name (e.g. "Fireworks Fireworks")
+                com_name = words[-1] if words else ""
+                if com_name in non_bird_counts:
+                    non_bird_counts[com_name] += 1
+                    continue
                 event_msg = f"Excluded: {msg[idx:].strip()}"
             events.append({"ts": ts, "level": "INFO", "source": "birdnet", "msg": event_msg})
         elif "][ERROR]" in msg:
             # BirdNET-Pi uses Python logging with format "[module][LEVEL] message"
             events.append({"ts": ts, "level": "ERROR", "source": "birdnet", "msg": msg})
+
+    if any(c > 0 for c in non_bird_counts.values()):
+        parts = ", ".join(f"{non_bird_counts[n]} {n}" for n in NON_BIRD_SPECIES)
+        events.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "INFO",
+            "source": "birdnet",
+            "msg": f"Detected: {parts}",
+        })
 
     return events, new_cursor
 
