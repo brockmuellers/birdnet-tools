@@ -20,8 +20,8 @@ Currently, this repository:
 	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
 	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
-	- `health_events.jsonl`: WARN/ERROR lines from `health.log` and temp threshold WARN events from `scripts/sample_temp.py`
-	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_temp.py` (every 5 min); future samplers add keys to the same records
+	- `health_events.jsonl`: WARN/ERROR lines from `health.log`; temp threshold WARNs and service-down ERRORs from `scripts/sample_metrics.py`
+	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
 ## Running
@@ -31,13 +31,13 @@ scripts/export_data.py                         # manual test run for export; rea
 scripts/backup_db_r2.py                        # manual test run for DB R2 backup; reads .env automatically
 scripts/run_backup.sh --db                     # nightly DB backup (test before enabling cron)
 scripts/run_backup.sh --full                   # weekly full backup (pauses BirdNET-Pi services)
-scripts/sample_temp.py                         # manual test run for temp sampling; reads .env automatically
+scripts/sample_metrics.py                      # manual test run for metric sampling; reads .env automatically
 scripts/push_events.py                         # manual test run for event push; reads .env automatically
 python3 scripts/excluded_detections.py         # show frequency-excluded detections (last 7 days)
 python3 scripts/excluded_detections.py --days 14
 ```
 
-`export_data.py`, `backup_db_r2.py`, `run_backup.sh`, `sample_temp.py`, and `push_events.py` all use `flock` to prevent overlapping cron runs.
+`export_data.py`, `backup_db_r2.py`, `run_backup.sh`, `sample_metrics.py`, and `push_events.py` all use `flock` to prevent overlapping cron runs.
 
 `run_cron.sh` is a thin wrapper used in all cron entries. It runs the given command and appends an ERROR line to `failures.log` if the exit code is non-zero, enabling `push_events.py` to surface cron failures alongside other events.
 
@@ -82,6 +82,6 @@ REPO=/home/sara/repos/birdnet-tools
 0 2 * * *   $REPO/scripts/run_cron.sh db-backup     timeout 30m $REPO/scripts/run_backup.sh --db           >> $REPO/backup.log  2>&1
 0 3 * * 0   $REPO/scripts/run_cron.sh full-backup   timeout 2h  $REPO/scripts/run_backup.sh --full          >> $REPO/backup.log  2>&1
 30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py               >> $REPO/backup.log  2>&1
-*/5 * * * * $REPO/scripts/run_cron.sh temp-sample   timeout 30  $REPO/scripts/sample_temp.py               >> $REPO/health.log  2>&1
+*/5 * * * * $REPO/scripts/run_cron.sh metrics       timeout 30  $REPO/scripts/sample_metrics.py            >> $REPO/health.log  2>&1
 */15 * * * * $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py               >> $REPO/health.log  2>&1
 ```

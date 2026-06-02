@@ -6,7 +6,7 @@ Sources:
 - export.log / backup.log: WARN and ERROR lines from cron job scripts
 - failures.log: non-zero exit codes captured by run_cron.sh
 - health_events.jsonl: WARN/ERROR events from health.log and temp threshold events
-- metric_samples.jsonl: periodic numeric samples written by sample_temp.py (and future samplers)
+- metric_samples.jsonl: periodic numeric samples written by sample_metrics.py
 
 Events are stored locally in birdnet_events.jsonl, health_events.jsonl, and cron_events.jsonl,
 pruned to EVENT_LOG_RETAIN_DAYS, merged by timestamp, and uploaded to R2.
@@ -86,7 +86,7 @@ def _append_events(path: Path, events: list[dict]) -> None:
 def _prune_events(path: Path, retain_days: int) -> None:
     """Rewrite path in-place, dropping events older than retain_days.
 
-    Uses in-place truncation (rather than rename) so that sample_temp.py's
+    Uses in-place truncation (rather than rename) so that sample_metrics.py's
     concurrent appends always land on the same inode.
     """
     if not path.exists():
