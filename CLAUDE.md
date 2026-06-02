@@ -76,6 +76,14 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 
 When more context is required to understand the functionality of BirdNET-Pi, its repo may be found at `../BirdNET-Pi/`.
 
+## Logging conventions
+
+Python scripts use `setup_logging()` from `scripts/_utils.py`. It configures Python's stdlib `logging` module with the format `[timestamp] LEVEL: message` on stdout, mapping `WARNING` → `WARN` to match `push_events.py`'s `_LEVEL_RE` parser. All Python scripts call `setup_logging()` near startup and wrap `main()` in a top-level `try/except Exception: logging.exception(...)` so that unhandled crashes produce an `ERROR:` line that `push_events.py` can surface.
+
+`push_events.py` scans log files (`export.log`, `backup.log`, `health.log`, `failures.log`) for lines matching `\b(WARN|ERROR):\s*(.*)`. Only lines with those prefixes are surfaced in the R2 event log — bare stderr output without a level prefix is ignored.
+
+Bash scripts (`run_backup.sh`) do not yet emit structured `ERROR:`-prefixed output. Bare command errors (e.g., from `stat`, `mkdir`) end up in the log file but are not surfaced in the event log. New bash scripts should either use a similar `log "ERROR: ..."` convention or redirect stderr through a structured prefix.
+
 ## Cron jobs
 
 All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `logs/failures.log` and surfaced in the R2 event log. Set `REPO` once at the top of your crontab:

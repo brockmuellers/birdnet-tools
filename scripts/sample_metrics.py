@@ -7,6 +7,7 @@ Writes ERROR to health_events.jsonl for any monitored service that is not active
 """
 import fcntl
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from _r2 import load_env
+from _utils import setup_logging
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-sample-metrics.lock")
@@ -30,7 +32,7 @@ def _acquire_lock() -> None:
     try:
         fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print(f"{datetime.now().isoformat()} WARN: Another sample_metrics is already running. Skipping.")
+        logging.warning("Another sample_metrics is already running. Skipping.")
         sys.exit(0)
 
 
@@ -42,6 +44,7 @@ def _append_event(path: Path, event: dict) -> None:
 
 
 def main():
+    setup_logging()
     load_env(REPO_DIR / ".env")
     _acquire_lock()
 
@@ -57,11 +60,11 @@ def main():
         if temp_c >= warn_c:
             msg = f"{temp_c:.1f}°C (exceeds threshold {warn_c:.0f}°C)"
             _append_event(HEALTH_EVENTS, {"ts": now, "level": "WARN", "source": "temp", "msg": msg})
-            print(f"[{datetime.now().isoformat()}] WARN: {msg}")
+            logging.warning("%s", msg)
         else:
-            print(f"[{datetime.now().isoformat()}] INFO: temp {temp_c:.1f}°C")
+            logging.info("temp %.1f°C", temp_c)
     except OSError as e:
-        print(f"ERROR: Cannot read temperature: {e}", file=sys.stderr)
+        logging.error("Cannot read temperature: %s", e)
 
     # Available memory
     try:
@@ -72,7 +75,7 @@ def main():
                 if mem_mb <= warn_mem_mb:
                     msg = f"{mem_mb:.0f} MB available (below threshold {warn_mem_mb:.0f} MB)"
                     _append_event(HEALTH_EVENTS, {"ts": now, "level": "WARN", "source": "memory", "msg": msg})
-                    print(f"[{datetime.now().isoformat()}] WARN: {msg}")
+                    logging.warning("%s", msg)
                 break
     except (OSError, ValueError):
         pass
@@ -116,7 +119,7 @@ def main():
             pass
 
     _append_event(METRIC_SAMPLES, sample)
-    print(f"[{datetime.now().isoformat()}] INFO: sample written ({', '.join(f'{k}={v}' for k, v in sample.items() if k != 'ts')})")
+    logging.info("sample written (%s)", ", ".join(f"{k}={v}" for k, v in sample.items() if k != "ts"))
 
     # Service health checks
     try:
@@ -129,10 +132,14 @@ def main():
             if status != "active":
                 msg = f"Service {svc} is {status}"
                 _append_event(HEALTH_EVENTS, {"ts": now, "level": "ERROR", "source": "services", "msg": msg})
-                print(f"[{datetime.now().isoformat()}] ERROR: {msg}")
+                logging.error("%s", msg)
     except Exception as e:
-        print(f"ERROR: Cannot check service status: {e}", file=sys.stderr)
+        logging.error("Cannot check service status: %s", e)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logging.exception("Unexpected error")
+        sys.exit(1)

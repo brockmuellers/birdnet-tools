@@ -2,6 +2,7 @@
 """Export BirdNET-Pi detections to JSON and upload to Cloudflare R2."""
 import fcntl
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -9,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from _r2 import load_env, upload_to_r2
-from _utils import local_timezone_name
+from _utils import local_timezone_name, setup_logging
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-export.lock")
@@ -22,10 +23,11 @@ def _acquire_lock() -> None:
     try:
         fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print(f"{datetime.now().isoformat()} WARN: Another export is already running. Skipping.")
+        logging.warning("Another export is already running. Skipping.")
         sys.exit(0)
 
 
+setup_logging()
 load_env(REPO_DIR / ".env")
 _acquire_lock()
 
@@ -63,7 +65,7 @@ def query_db(db_path: str) -> dict:
     try:
         conn = sqlite3.connect(uri, uri=True)
     except sqlite3.OperationalError as e:
-        print(f"ERROR: Cannot open database at {db_path}: {e}", file=sys.stderr)
+        logging.error("Cannot open database at %s: %s", db_path, e)
         sys.exit(1)
 
     with conn:
@@ -95,26 +97,30 @@ def write_json(data: dict, tmp_path: Path, final_path: Path) -> None:
         tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp_path, final_path)
     except OSError as e:
-        print(f"ERROR: Failed to write JSON: {e}", file=sys.stderr)
+        logging.error("Failed to write JSON: %s", e)
         sys.exit(1)
 
 
 def main():
-    print(f"[{datetime.now().isoformat()}] Starting export...")
+    logging.info("Starting export...")
     data = query_db(DB_PATH)
-    print(f"  Recent observations: {len(data['recent'])}")
-    print(f"  Months in stats:     {len(data['monthly'])}")
+    logging.info("Recent observations: %d", len(data["recent"]))
+    logging.info("Months in stats:     %d", len(data["monthly"]))
     write_json(data, TMP_PATH, OUTPUT_PATH)
-    print(f"  JSON written to {OUTPUT_PATH}")
+    logging.info("JSON written to %s", OUTPUT_PATH)
     upload_to_r2(
         OUTPUT_PATH,
         R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, R2_OBJECT_KEY,
         content_type="application/json",
         extra_headers={"cache-control": "public, max-age=60"},
     )
-    print(f"  Uploaded to R2: s3://{R2_BUCKET}/{R2_OBJECT_KEY}")
-    print(f"[{datetime.now().isoformat()}] Done.")
+    logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, R2_OBJECT_KEY)
+    logging.info("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logging.exception("Unexpected error")
+        sys.exit(1)

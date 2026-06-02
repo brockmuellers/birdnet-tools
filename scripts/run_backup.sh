@@ -23,8 +23,10 @@ BIRDNET_BACKUP_SCRIPT="${HOME}/BirdNET-Pi/scripts/backup_data.sh"
 MODE="${1:-}"
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S')] $*"
 }
+
+trap 'log "ERROR: command failed at line $LINENO: $BASH_COMMAND"' ERR
 
 check_disk() {
     local used_pct

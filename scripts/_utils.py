@@ -1,6 +1,19 @@
 """Shared utilities for birdnet-tools scripts."""
+import logging
 import os
+import sys
 from pathlib import Path
+
+
+def setup_logging() -> None:
+    """Configure root logger: [timestamp] LEVEL: message on stdout."""
+    logging.addLevelName(logging.WARNING, "WARN")
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        fmt="[%(asctime)s] %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    logging.basicConfig(handlers=[handler], level=logging.INFO)
 
 
 def local_timezone_name() -> str:

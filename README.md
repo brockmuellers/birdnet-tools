@@ -32,6 +32,8 @@ python3 scripts/excluded_detections.py [--days N]
 
 All cron entries use `run_cron.sh` as a wrapper. It passes the exit code through and appends an `ERROR` line to `logs/failures.log` on failure, which `push_events.py` picks up and surfaces in the R2 event log.
 
+**Logging conventions:** Python scripts use `setup_logging()` from `scripts/_utils.py`, which configures Python's stdlib `logging` module to emit `[timestamp] LEVEL: message` lines on stdout. `push_events.py` scans log files for `WARN:` and `ERROR:` prefixed lines; only lines with those prefixes are surfaced in the R2 event log. Unhandled exceptions are caught at `__main__` and logged via `logging.exception()`, ensuring crashes produce an `ERROR:` line that gets picked up. Bash scripts (`run_backup.sh`) do not yet have equivalent structured error output — bare stderr from failed commands lands in the log file without a level prefix and is not surfaced in the event log.
+
 `install_cron.sh` installs all jobs at once and is safe to re-run — it removes any existing birdnet-tools entries (including old absolute-path style entries) before adding the current set:
 
 ```

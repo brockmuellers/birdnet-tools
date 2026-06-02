@@ -14,6 +14,7 @@ Metric samples are bucketed into hourly windows (min/max/avg per key) and upload
 """
 import fcntl
 import json
+import logging
 import os
 import re
 import socket
@@ -24,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from _r2 import load_env, upload_to_r2
-from _utils import local_timezone_name
+from _utils import local_timezone_name, setup_logging
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-push-events.lock")
@@ -54,7 +55,7 @@ def _acquire_lock() -> None:
     try:
         fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print(f"{datetime.now().isoformat()} WARN: Another push_events is already running. Skipping.")
+        logging.warning("Another push_events is already running. Skipping.")
         sys.exit(0)
 
 
@@ -340,6 +341,7 @@ def aggregate_metric_windows(samples: list[dict]) -> list[dict]:
 
 
 def main():
+    setup_logging()
     load_env(REPO_DIR / ".env")
     _acquire_lock()
 
@@ -356,17 +358,17 @@ def main():
     ip_events = check_ip_change(state)
     if ip_events:
         _append_events(HEALTH_EVENTS, ip_events)
-        print(f"  {len(ip_events)} IP change event(s): {ip_events[0]['msg']}")
+        logging.info("%d IP change event(s): %s", len(ip_events), ip_events[0]["msg"])
 
-    print(f"[{datetime.now().isoformat()}] Collecting journal events...")
+    logging.info("Collecting journal events...")
     journal_events, new_cursor = collect_journal_events(state, RETAIN_DAYS)
     if journal_events:
         _append_events(BIRDNET_EVENTS, journal_events)
-        print(f"  {len(journal_events)} new birdnet event(s)")
+        logging.info("%d new birdnet event(s)", len(journal_events))
     if new_cursor:
         state["journal_cursor"] = new_cursor
 
-    print(f"[{datetime.now().isoformat()}] Collecting log file events...")
+    logging.info("Collecting log file events...")
     for log_filename, source, state_key, dest in [
         ("logs/export.log",   "export",  "export_log_offset",   CRON_EVENTS),
         ("logs/backup.log",   "backup",  "backup_log_offset",   CRON_EVENTS),
@@ -377,23 +379,23 @@ def main():
         events, new_offset = collect_log_events(REPO_DIR / log_filename, source, offset)
         if events:
             _append_events(dest, events)
-            print(f"  {len(events)} new {source} log event(s)")
+            logging.info("%d new %s log event(s)", len(events), source)
         state[state_key] = new_offset
 
     _save_state(state)
 
-    print(f"[{datetime.now().isoformat()}] Pruning old events...")
+    logging.info("Pruning old events...")
     _prune_events(HEALTH_EVENTS, RETAIN_DAYS)
     _prune_events(BIRDNET_EVENTS, RETAIN_DAYS)
     _prune_events(CRON_EVENTS, RETAIN_DAYS)
     _prune_events(METRIC_SAMPLES, RETAIN_DAYS)
 
-    print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
+    logging.info("Collecting health snapshot...")
     metric_samples = _load_events(METRIC_SAMPLES)
     latest_sample = max(metric_samples, key=lambda s: s.get("ts", ""), default={})
     health_snapshot = collect_health_snapshot(DB_PATH, state.get("last_successful_upload_at"), latest_sample)
 
-    print(f"[{datetime.now().isoformat()}] Merging and uploading...")
+    logging.info("Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
     birdnet = _load_events(BIRDNET_EVENTS)
     cron = _load_events(CRON_EVENTS)
@@ -442,11 +444,15 @@ def main():
     state["last_successful_upload_at"] = datetime.now(timezone.utc).isoformat()
     _save_state(state)
 
-    print(f"  Uploaded to R2: s3://{R2_BUCKET}/{EVENT_LOG_KEY}")
-    print(f"  Total events: {len(all_events)} ({len(health)} health, {len(birdnet)} birdnet, {len(cron)} cron)")
-    print(f"  Metric windows: {len(metric_windows)} ({len(metric_samples)} samples); last_hour: {len(last_hour)} keys, last_day: {len(last_day)} keys")
-    print(f"[{datetime.now().isoformat()}] Done.")
+    logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, EVENT_LOG_KEY)
+    logging.info("Total events: %d (%d health, %d birdnet, %d cron)", len(all_events), len(health), len(birdnet), len(cron))
+    logging.info("Metric windows: %d (%d samples); last_hour: %d keys, last_day: %d keys", len(metric_windows), len(metric_samples), len(last_hour), len(last_day))
+    logging.info("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logging.exception("Unexpected error")
+        sys.exit(1)
