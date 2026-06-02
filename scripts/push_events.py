@@ -213,6 +213,31 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
     return events, new_offset
 
 
+def check_ip_change(state: dict) -> list[dict]:
+    """Return a WARN event if primary_ip changed since the last run, and update state."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1)
+        s.connect(("8.8.8.8", 80))
+        current_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        return []
+
+    events = []
+    last_ip = state.get("last_primary_ip")
+    if last_ip and last_ip != current_ip:
+        msg = f"primary_ip changed from {last_ip} to {current_ip} — mDNS hostname (.local) may no longer resolve correctly"
+        events.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "WARN",
+            "source": "network",
+            "msg": msg,
+        })
+    state["last_primary_ip"] = current_ip
+    return events
+
+
 def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, latest_sample: dict | None = None) -> dict:
     snapshot: dict = {}
     if latest_sample is None:
@@ -248,6 +273,11 @@ def collect_health_snapshot(db_path: str | None, last_upload_at: str | None, lat
     for key in ("temp_c", "memory_available_mb", "wifi_signal_dbm"):
         if key in latest_sample:
             snapshot[key] = latest_sample[key]
+
+    try:
+        snapshot["hostname"] = socket.gethostname()
+    except Exception:
+        pass
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -322,6 +352,11 @@ def main():
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
 
     state = _load_state()
+
+    ip_events = check_ip_change(state)
+    if ip_events:
+        _append_events(HEALTH_EVENTS, ip_events)
+        print(f"  {len(ip_events)} IP change event(s): {ip_events[0]['msg']}")
 
     print(f"[{datetime.now().isoformat()}] Collecting journal events...")
     journal_events, new_cursor = collect_journal_events(state, RETAIN_DAYS)

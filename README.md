@@ -224,7 +224,7 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 - `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`) and `[ERROR]`-level messages
 - `logs/export.log` / `logs/backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
 - `logs/failures.log` — non-zero exit codes written by `run_cron.sh`
-- `health_events.jsonl` — temp threshold warnings and service-down errors from `sample_metrics.py`
+- `health_events.jsonl` — temp threshold warnings, service-down errors from `sample_metrics.py`, and IP-change warnings when `primary_ip` shifts between runs (indicates DHCP reassignment that breaks `.local` mDNS)
 - `metric_samples.jsonl` — numeric samples written by `sample_metrics.py` every 5 minutes
 
 **Local storage:** events accumulate in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS` (default 7). Metric samples are stored in `metric_samples.jsonl` and bucketed into hourly min/max/avg windows for upload.
@@ -244,13 +244,15 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
     "temp_c": 51.2,
     "memory_available_mb": 612.0,
     "wifi_signal_dbm": -58,
+    "hostname": "echo-birdnet",
     "primary_ip": "192.168.1.42"
   },
   "events": [
     {"ts": "...", "level": "INFO",  "source": "birdnet",   "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax)"},
     {"ts": "...", "level": "WARN",  "source": "temp",      "msg": "72.1°C (exceeds threshold 70°C)"},
     {"ts": "...", "level": "ERROR", "source": "cron",      "msg": "export exited with code 1"},
-    {"ts": "...", "level": "ERROR", "source": "services",  "msg": "Service birdnet_analysis is inactive"}
+    {"ts": "...", "level": "ERROR", "source": "services",  "msg": "Service birdnet_analysis is inactive"},
+    {"ts": "...", "level": "WARN",  "source": "network",   "msg": "primary_ip changed from 192.168.1.42 to 192.168.1.55 — mDNS hostname (.local) may no longer resolve correctly"}
   ],
   "metric_windows": [
     {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}, "wifi_signal_dbm": {"min": -65, "max": -55, "avg": -60.0}, "disk_root_used_pct": {"min": 41.8, "max": 42.1, "avg": 42.0}, "disk_root_free_gb": {"min": 12.1, "max": 12.3, "avg": 12.2}}
