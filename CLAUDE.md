@@ -20,7 +20,7 @@ Currently, this repository:
 	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
 	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
-	- `health_events.jsonl`: WARN/ERROR lines from `health.log`; temp threshold WARNs and service-down ERRORs from `scripts/sample_metrics.py`
+	- `health_events.jsonl`: WARN/ERROR lines from `health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`
 	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
@@ -56,6 +56,7 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - `R2_DB_BACKUP_MAX_MB` — **required** by `backup_db_r2.py`; backup aborts if DB exceeds this many MB; warn logged at 80% of limit (note: upload reads the snapshot into memory, so allow ~2–3× the DB size in free RAM)
 - `R2_DB_BACKUP_OBJECT_KEY` — R2 object key for the DB backup (default: `birds.db`); overwritten nightly (no history kept in R2)
 - `TEMP_WARN_C` — log a WARN when chip temperature exceeds this value (default: 70°C)
+- `MEMORY_WARN_MB` — log a WARN when available memory falls below this value (default: 100 MB)
 - `EVENT_LOG_RETAIN_DAYS` — days of events to keep locally and upload (default: 7)
 - `EVENT_LOG_OBJECT_KEY` — R2 object key for the event log (default: `birdnet-events.json`)
 

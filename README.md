@@ -183,6 +183,7 @@ Samples system metrics every 5 minutes and appends a record to `metric_samples.j
 
 **Events written to `health_events.jsonl`:**
 - `WARN` if chip temperature exceeds `TEMP_WARN_C` (default 70°C)
+- `WARN` if available memory falls below `MEMORY_WARN_MB` (default 100 MB)
 - `ERROR` for each monitored service that is not active (`birdnet_analysis`, `birdnet_recording`, `birdnet_stats`, `caddy`, `ssh`)
 
 #### Prerequisites
@@ -195,7 +196,8 @@ Samples system metrics every 5 minutes and appends a record to `metric_samples.j
 
 Optionally add to `.env`:
 ```
-# TEMP_WARN_C=70  # optional, this is the default
+# TEMP_WARN_C=70     # optional, this is the default
+# MEMORY_WARN_MB=100  # optional, this is the default
 ```
 
 Make the script executable:

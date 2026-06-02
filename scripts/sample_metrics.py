@@ -46,6 +46,7 @@ def main():
     _acquire_lock()
 
     warn_c = float(os.environ.get("TEMP_WARN_C", "70"))
+    warn_mem_mb = float(os.environ.get("MEMORY_WARN_MB", "100"))
     now = datetime.now(timezone.utc).isoformat()
     sample: dict = {"ts": now}
 
@@ -66,7 +67,12 @@ def main():
     try:
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("MemAvailable:"):
-                sample["memory_available_mb"] = round(int(line.split()[1]) / 1024, 1)
+                mem_mb = round(int(line.split()[1]) / 1024, 1)
+                sample["memory_available_mb"] = mem_mb
+                if mem_mb <= warn_mem_mb:
+                    msg = f"{mem_mb:.0f} MB available (below threshold {warn_mem_mb:.0f} MB)"
+                    _append_event(HEALTH_EVENTS, {"ts": now, "level": "WARN", "source": "memory", "msg": msg})
+                    print(f"[{datetime.now().isoformat()}] WARN: {msg}")
                 break
     except (OSError, ValueError):
         pass
