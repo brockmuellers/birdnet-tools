@@ -214,25 +214,13 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
     return events, new_offset
 
 
-_HEALTH_SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats", "caddy", "ssh"]
-
-
-def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_upload_at: str | None) -> dict:
+def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_upload_at: str | None, latest_sample: dict | None = None) -> dict:
     snapshot: dict = {}
+    if latest_sample is None:
+        latest_sample = {}
 
     if last_upload_at is not None:
         snapshot["last_successful_upload_at"] = last_upload_at
-
-    # Service status
-    try:
-        result = subprocess.run(
-            ["systemctl", "is-active"] + _HEALTH_SERVICES,
-            capture_output=True, text=True,
-        )
-        statuses = result.stdout.strip().splitlines()
-        snapshot["services"] = dict(zip(_HEALTH_SERVICES, statuses))
-    except Exception:
-        pass
 
     # Disk usage: always include /, add BACKUP_DEST if it's a different filesystem
     def _disk_stat(path: str) -> dict:
@@ -268,29 +256,18 @@ def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_u
         except Exception:
             pass
 
-    # Chip temperature
-    try:
-        temp_c = int(Path("/sys/class/thermal/thermal_zone0/temp").read_text().strip()) / 1000
-        snapshot["temp_c"] = round(temp_c, 1)
-    except OSError:
-        pass
-
     # System uptime
     try:
         snapshot["uptime_seconds"] = int(float(Path("/proc/uptime").read_text().split()[0]))
     except OSError:
         pass
 
-    # Available memory
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                snapshot["memory_available_mb"] = round(int(line.split()[1]) / 1024, 1)
-                break
-    except (OSError, ValueError):
-        pass
+    # Metrics sourced from latest sample collected by sample_metrics.py
+    for key in ("temp_c", "memory_available_mb", "wifi_signal_dbm"):
+        if key in latest_sample:
+            snapshot[key] = latest_sample[key]
 
-    # Network: interface states + WiFi signal + primary outbound IP
+    # Network: interface states + primary outbound IP
     interfaces: dict = {}
     net_root = Path("/sys/class/net")
     if net_root.exists():
@@ -305,19 +282,6 @@ def collect_health_snapshot(db_path: str | None, backup_dest: str | None, last_u
                 interfaces[name] = {"state": state}
             except OSError:
                 pass
-
-    try:
-        for line in Path("/proc/net/wireless").read_text().splitlines()[2:]:
-            parts = line.split()
-            if len(parts) >= 4:
-                name = parts[0].rstrip(":")
-                if name in interfaces:
-                    try:
-                        interfaces[name]["signal_dbm"] = int(float(parts[3].rstrip(".")))
-                    except ValueError:
-                        pass
-    except OSError:
-        pass
 
     if interfaces:
         snapshot["interfaces"] = interfaces
@@ -407,7 +371,9 @@ def main():
     _prune_events(METRIC_SAMPLES, RETAIN_DAYS)
 
     print(f"[{datetime.now().isoformat()}] Collecting health snapshot...")
-    health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"))
+    metric_samples = _load_events(METRIC_SAMPLES)
+    latest_sample = max(metric_samples, key=lambda s: s.get("ts", ""), default={})
+    health_snapshot = collect_health_snapshot(DB_PATH, BACKUP_DEST, state.get("last_successful_upload_at"), latest_sample)
 
     print(f"[{datetime.now().isoformat()}] Merging and uploading...")
     health = _load_events(HEALTH_EVENTS)
@@ -415,7 +381,6 @@ def main():
     cron = _load_events(CRON_EVENTS)
     all_events = sorted(health + birdnet + cron, key=lambda e: e.get("ts", ""), reverse=True)
 
-    metric_samples = _load_events(METRIC_SAMPLES)
     metric_windows = aggregate_metric_windows(metric_samples)
 
     payload = {
