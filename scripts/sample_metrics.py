@@ -120,8 +120,8 @@ def main():
                     _append_event(HEALTH_EVENTS, {"ts": now, "level": "WARN", "source": "memory", "msg": msg})
                     logging.warning("%s", msg)
                 break
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as e:
+        logging.error("Cannot read memory info: %s", e)
 
     # WiFi signal (first wireless interface found)
     try:
@@ -199,7 +199,7 @@ def main():
     try:
         result = subprocess.run(
             ["systemctl", "is-active"] + _SYSTEMCTL_SERVICES,
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=15,
         )
         statuses = result.stdout.strip().splitlines()
         for svc, status in zip(_SYSTEMCTL_SERVICES, statuses):
