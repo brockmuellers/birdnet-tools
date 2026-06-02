@@ -207,6 +207,12 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
         if not level_m:
             continue
 
+        if not ts_m:
+            logging.warning(
+                "Log line from source %r had no timestamp; assigned %s: %s",
+                source, last_ts, raw_line.strip(),
+            )
+
         level = level_m.group(1)
         msg = level_m.group(2).strip()
         events.append({"ts": last_ts, "level": level, "source": source, "msg": msg})
