@@ -381,6 +381,18 @@ def main():
     cron = _load_events(CRON_EVENTS)
     all_events = sorted(health + birdnet + cron, key=lambda e: e.get("ts", ""), reverse=True)
 
+    _MAX_EVENTS = 5000
+    if len(all_events) > _MAX_EVENTS:
+        total = len(all_events)
+        all_events = all_events[:_MAX_EVENTS]
+        omitted = total - _MAX_EVENTS
+        all_events.append({
+            "ts": all_events[-1].get("ts", datetime.now(timezone.utc).isoformat()),
+            "level": "ERROR",
+            "source": "truncation",
+            "msg": f"Showing {_MAX_EVENTS} most recent events; {omitted} older event(s) not included",
+        })
+
     metric_windows = aggregate_metric_windows(metric_samples)
 
     payload = {
