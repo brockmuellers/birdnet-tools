@@ -18,9 +18,9 @@ Currently, this repository:
 - Backs up `birds.db` to Cloudflare R2 nightly (`scripts/backup_db_r2.py`). Aborts with an error if the DB exceeds a configurable size ceiling; warns at 80% of that ceiling. Uses SQLite's online backup API for a safe snapshot, then uploads via SigV4.
 - Aggregates events and pushes them to Cloudflare R2 every 15 minutes (`scripts/push_events.py`). Sources:
 	- `birdnet_analysis` systemd journal: species frequency exclusions (INFO) and errors (ERROR)
-	- `export.log` / `backup.log`: WARN and ERROR lines emitted by cron scripts
-	- `failures.log`: non-zero exit codes captured by `run_cron.sh`
-	- `health_events.jsonl`: WARN/ERROR lines from `health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`
+	- `logs/export.log` / `logs/backup.log`: WARN and ERROR lines emitted by cron scripts
+	- `logs/failures.log`: non-zero exit codes captured by `run_cron.sh`
+	- `health_events.jsonl`: WARN/ERROR lines from `logs/health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`
 	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`, `disk_root_used_pct`, `disk_root_free_gb`, `disk_backup_used_pct`, `disk_backup_free_gb`
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
 
@@ -39,7 +39,7 @@ python3 scripts/excluded_detections.py --days 14
 
 `export_data.py`, `backup_db_r2.py`, `run_backup.sh`, `sample_metrics.py`, and `push_events.py` all use `flock` to prevent overlapping cron runs.
 
-`run_cron.sh` is a thin wrapper used in all cron entries. It runs the given command and appends an ERROR line to `failures.log` if the exit code is non-zero, enabling `push_events.py` to surface cron failures alongside other events.
+`run_cron.sh` is a thin wrapper used in all cron entries. It runs the given command and appends an ERROR line to `logs/failures.log` if the exit code is non-zero, enabling `push_events.py` to surface cron failures alongside other events.
 
 `excluded_detections.py` reads from the `birdnet_analysis` systemd journal and queries the BirdNET-Pi metadata model via `~/BirdNET-Pi/birdnet/bin/python3` (the BirdNET-Pi venv, which has TensorFlow Lite). It does not need the `.env` file.
 
@@ -78,15 +78,15 @@ When more context is required to understand the functionality of BirdNET-Pi, its
 
 ## Cron jobs
 
-All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `failures.log` and surfaced in the R2 event log. Set `REPO` once at the top of your crontab:
+All entries are wrapped with `run_cron.sh LABEL` so non-zero exit codes are appended to `logs/failures.log` and surfaced in the R2 event log. Set `REPO` once at the top of your crontab:
 
 ```
 REPO=/home/sara/repos/birdnet-tools
 
-*/15 * * * * $REPO/scripts/run_cron.sh export       timeout 10m $REPO/scripts/export_data.py              >> $REPO/export.log  2>&1
-0 2 * * *   $REPO/scripts/run_cron.sh db-backup     timeout 30m $REPO/scripts/run_backup.sh --db           >> $REPO/backup.log  2>&1
-0 3 * * 0   $REPO/scripts/run_cron.sh full-backup   timeout 2h  $REPO/scripts/run_backup.sh --full          >> $REPO/backup.log  2>&1
-30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py               >> $REPO/backup.log  2>&1
-*/5 * * * * $REPO/scripts/run_cron.sh metrics       timeout 30  $REPO/scripts/sample_metrics.py            >> $REPO/health.log  2>&1
-*/15 * * * * $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py               >> $REPO/health.log  2>&1
+*/15 * * * * $REPO/scripts/run_cron.sh export       timeout 10m $REPO/scripts/export_data.py              >> $REPO/logs/export.log  2>&1
+0 2 * * *   $REPO/scripts/run_cron.sh db-backup     timeout 30m $REPO/scripts/run_backup.sh --db           >> $REPO/logs/backup.log  2>&1
+0 3 * * 0   $REPO/scripts/run_cron.sh full-backup   timeout 2h  $REPO/scripts/run_backup.sh --full          >> $REPO/logs/backup.log  2>&1
+30 2 * * *  $REPO/scripts/run_cron.sh db-r2-backup  timeout 30m $REPO/scripts/backup_db_r2.py               >> $REPO/logs/backup.log  2>&1
+*/5 * * * * $REPO/scripts/run_cron.sh metrics       timeout 30  $REPO/scripts/sample_metrics.py            >> $REPO/logs/health.log  2>&1
+*/15 * * * * $REPO/scripts/run_cron.sh push-events  timeout 10m $REPO/scripts/push_events.py               >> $REPO/logs/health.log  2>&1
 ```

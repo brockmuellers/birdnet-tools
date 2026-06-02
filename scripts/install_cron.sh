@@ -19,12 +19,12 @@ cleaned="$(
 
 # \$ produces a literal $ in the crontab so cron expands $REPO at run time.
 new_entries="REPO=${REPO_DIR}
-*/15 * * * *  \$REPO/scripts/run_cron.sh export       timeout 10m \$REPO/scripts/export_data.py      >> \$REPO/export.log  2>&1
-0    2 * * *  \$REPO/scripts/run_cron.sh db-backup     timeout 30m \$REPO/scripts/run_backup.sh --db   >> \$REPO/backup.log  2>&1
-0    3 * * 0  \$REPO/scripts/run_cron.sh full-backup   timeout 2h  \$REPO/scripts/run_backup.sh --full  >> \$REPO/backup.log  2>&1
-30   2 * * *  \$REPO/scripts/run_cron.sh db-r2-backup  timeout 30m \$REPO/scripts/backup_db_r2.py       >> \$REPO/backup.log  2>&1
-*/5  * * * *  \$REPO/scripts/run_cron.sh metrics       timeout 30  \$REPO/scripts/sample_metrics.py     >> \$REPO/health.log  2>&1
-*/15 * * * *  \$REPO/scripts/run_cron.sh push-events   timeout 10m \$REPO/scripts/push_events.py        >> \$REPO/health.log  2>&1"
+*/15 * * * *  \$REPO/scripts/run_cron.sh export       timeout 10m \$REPO/scripts/export_data.py      >> \$REPO/logs/export.log  2>&1
+0    2 * * *  \$REPO/scripts/run_cron.sh db-backup     timeout 30m \$REPO/scripts/run_backup.sh --db   >> \$REPO/logs/backup.log  2>&1
+0    3 * * 0  \$REPO/scripts/run_cron.sh full-backup   timeout 2h  \$REPO/scripts/run_backup.sh --full  >> \$REPO/logs/backup.log  2>&1
+30   2 * * *  \$REPO/scripts/run_cron.sh db-r2-backup  timeout 30m \$REPO/scripts/backup_db_r2.py       >> \$REPO/logs/backup.log  2>&1
+*/5  * * * *  \$REPO/scripts/run_cron.sh metrics       timeout 30  \$REPO/scripts/sample_metrics.py     >> \$REPO/logs/health.log  2>&1
+*/15 * * * *  \$REPO/scripts/run_cron.sh push-events   timeout 10m \$REPO/scripts/push_events.py        >> \$REPO/logs/health.log  2>&1"
 
 {
     [[ -n "$cleaned" ]] && printf '%s\n' "$cleaned"

@@ -30,7 +30,7 @@ python3 scripts/excluded_detections.py [--days N]
 
 ## Cron jobs
 
-All cron entries use `run_cron.sh` as a wrapper. It passes the exit code through and appends an `ERROR` line to `failures.log` on failure, which `push_events.py` picks up and surfaces in the R2 event log.
+All cron entries use `run_cron.sh` as a wrapper. It passes the exit code through and appends an `ERROR` line to `logs/failures.log` on failure, which `push_events.py` picks up and surfaces in the R2 event log.
 
 `install_cron.sh` installs all jobs at once and is safe to re-run — it removes any existing birdnet-tools entries (including old absolute-path style entries) before adding the current set:
 
@@ -82,7 +82,7 @@ If disk space is constrained, the nightly DB-only backup is a much leaner option
    scripts/run_backup.sh --full
    ```
 
-The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
+The nightly DB backup runs at 2am daily; the full backup runs at 3am on Sundays. Both log to `logs/backup.log`. A `WARN` line is written to the log when the backup disk exceeds the fill threshold (default 80%).
 
 Run `scripts/install_cron.sh` to register the cron jobs (see [Cron jobs](#cron-jobs)).
 
@@ -222,8 +222,8 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 
 **Sources:**
 - `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`) and `[ERROR]`-level messages
-- `export.log` / `backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
-- `failures.log` — non-zero exit codes written by `run_cron.sh`
+- `logs/export.log` / `logs/backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
+- `logs/failures.log` — non-zero exit codes written by `run_cron.sh`
 - `health_events.jsonl` — temp threshold warnings and service-down errors from `sample_metrics.py`
 - `metric_samples.jsonl` — numeric samples written by `sample_metrics.py` every 5 minutes
 

@@ -3,7 +3,8 @@
 # Usage: run_cron.sh LABEL COMMAND [ARGS...]
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FAILURES_LOG="${REPO_DIR}/failures.log"
+FAILURES_LOG="${REPO_DIR}/logs/failures.log"
+mkdir -p "${REPO_DIR}/logs"
 
 LABEL="${1:?Usage: run_cron.sh LABEL COMMAND [ARGS...]}"
 shift

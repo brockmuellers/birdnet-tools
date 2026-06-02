@@ -337,10 +337,10 @@ def main():
 
     print(f"[{datetime.now().isoformat()}] Collecting log file events...")
     for log_filename, source, state_key, dest in [
-        ("export.log",   "export",  "export_log_offset",   CRON_EVENTS),
-        ("backup.log",   "backup",  "backup_log_offset",   CRON_EVENTS),
-        ("health.log",   "health",  "health_log_offset",   HEALTH_EVENTS),
-        ("failures.log", "cron",    "failures_log_offset", CRON_EVENTS),
+        ("logs/export.log",   "export",  "export_log_offset",   CRON_EVENTS),
+        ("logs/backup.log",   "backup",  "backup_log_offset",   CRON_EVENTS),
+        ("logs/health.log",   "health",  "health_log_offset",   HEALTH_EVENTS),
+        ("logs/failures.log", "cron",    "failures_log_offset", CRON_EVENTS),
     ]:
         offset = state.get(state_key, 0)
         events, new_offset = collect_log_events(REPO_DIR / log_filename, source, offset)
