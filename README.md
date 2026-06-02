@@ -172,14 +172,24 @@ Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jo
 
 ---
 
-### sample_temp.py
+### sample_metrics.py
 
-Samples chip temperature every 5 minutes and appends an event to `health_events.jsonl`. Logs `INFO` normally; logs `WARN` if the temperature exceeds `TEMP_WARN_C` (default 70°C). Events are picked up by `push_events.py` on its next run and included in the R2 event log.
+Samples system metrics every 5 minutes and appends a record to `metric_samples.jsonl`. Also writes discrete events to `health_events.jsonl` when thresholds are exceeded or services are down.
+
+**Metrics sampled** (numeric, used by `push_events.py` to build hourly min/max/avg windows):
+- `temp_c` — chip temperature
+- `memory_available_mb` — available RAM
+- `wifi_signal_dbm` — WiFi signal strength (first wireless interface)
+
+**Events written to `health_events.jsonl`:**
+- `WARN` if chip temperature exceeds `TEMP_WARN_C` (default 70°C)
+- `ERROR` for each monitored service that is not active (`birdnet_analysis`, `birdnet_recording`, `birdnet_stats`, `caddy`, `ssh`)
 
 #### Prerequisites
 
 - Python 3
 - `/sys/class/thermal/thermal_zone0/temp` readable (standard on Raspberry Pi)
+- `systemctl` available
 
 #### Setup
 
@@ -190,12 +200,12 @@ Optionally add to `.env`:
 
 Make the script executable:
 ```
-chmod +x scripts/sample_temp.py
+chmod +x scripts/sample_metrics.py
 ```
 
 Run manually once to verify:
 ```
-scripts/sample_temp.py
+scripts/sample_metrics.py
 ```
 
 Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
@@ -210,19 +220,38 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 - `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`) and `[ERROR]`-level messages
 - `export.log` / `backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
 - `failures.log` — non-zero exit codes written by `run_cron.sh`
-- `health_events.jsonl` — temperature samples from `sample_temp.py`
+- `health_events.jsonl` — temp threshold warnings and service-down errors from `sample_metrics.py`
+- `metric_samples.jsonl` — numeric samples written by `sample_metrics.py` every 5 minutes
 
-**Local storage:** events accumulate in `health_events.jsonl` (temperature + log events) and `birdnet_events.jsonl` (journal events), pruned to `EVENT_LOG_RETAIN_DAYS` (default 7).
+**Local storage:** events accumulate in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS` (default 7). Metric samples are stored in `metric_samples.jsonl` and bucketed into hourly min/max/avg windows for upload.
+
+**Event log cap:** the `events` array is capped at 5000 entries (most recent first). If the cap is exceeded, a synthetic `ERROR` event is appended at the end indicating how many older events were omitted.
 
 **R2 payload shape:**
 ```json
 {
   "generated_at": "2026-06-01T12:00:00+00:00",
   "timezone": "America/Los_Angeles",
+  "health": {
+    "last_successful_upload_at": "...",
+    "disk": {"/": {"used_pct": 42.1, "free_gb": 12.3}},
+    "last_detection_at": "2026-06-01T11:58:00",
+    "db_size_mb": 87.4,
+    "uptime_seconds": 123456,
+    "temp_c": 51.2,
+    "memory_available_mb": 612.0,
+    "wifi_signal_dbm": -58,
+    "interfaces": {"wlan0": {"state": "up"}},
+    "primary_ip": "192.168.1.42"
+  },
   "events": [
-    {"ts": "...", "level": "INFO",  "source": "birdnet", "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax)"},
-    {"ts": "...", "level": "WARN",  "source": "temp",    "msg": "72.1°C (exceeds threshold 70°C)"},
-    {"ts": "...", "level": "ERROR", "source": "cron",    "msg": "export exited with code 1"}
+    {"ts": "...", "level": "INFO",  "source": "birdnet",   "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax)"},
+    {"ts": "...", "level": "WARN",  "source": "temp",      "msg": "72.1°C (exceeds threshold 70°C)"},
+    {"ts": "...", "level": "ERROR", "source": "cron",      "msg": "export exited with code 1"},
+    {"ts": "...", "level": "ERROR", "source": "services",  "msg": "Service birdnet_analysis is inactive"}
+  ],
+  "metric_windows": [
+    {"window_start": "2026-06-01T11:00:00+00:00", "temp_c": {"min": 49.1, "max": 53.4, "avg": 51.2}, "memory_available_mb": {"min": 580.0, "max": 640.0, "avg": 610.5}}
   ]
 }
 ```

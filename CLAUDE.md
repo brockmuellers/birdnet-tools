@@ -67,6 +67,10 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - DB backups use `sqlite3.Connection.backup()` (stdlib), not `cp`. Plain file copy is unsafe on a live SQLite database: it reads at the OS level without respecting SQLite's locking, risking torn writes; it also misses pending WAL-mode writes in the `-wal` sidecar.
 - Full backups write to `birdnet-full-backup.tar.tmp` and rename only on success, so a failed backup never destroys the previous good copy.
 
+## Documentation
+
+**Keep `README.md` in sync when scripts change.** Each script has its own section in the README covering prerequisites, setup, and behavior. When a script is renamed, added, removed, or its behavior changes (metrics sampled, events written, payload shape, env vars, cron label), update the corresponding README section in the same commit. Also update the cron table in the README's "Cron jobs" section and the payload shape example under `push_events.py` if the R2 JSON structure changes.
+
 ## Context
 
 When more context is required to understand the functionality of BirdNET-Pi, its repo may be found at `../BirdNET-Pi/`.
