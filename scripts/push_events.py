@@ -51,8 +51,10 @@ _LEVEL_RE = re.compile(r"\b(WARN|ERROR):\s*(.*)")
 
 
 def _load_nonzero_species() -> frozenset[str] | None:
-    """Load the set of species with frequency > 0 from the weekly cache.
+    """Load the set of frequency-excluded species from the weekly cache.
 
+    Returns the names of species present in this region but below SF_THRESH —
+    the band that BirdNET-Pi excludes and that we want to surface as events.
     Returns None (fail-open) if the cache is absent or unreadable, so that
     all exclusions are recorded rather than silently dropped.
     """
@@ -65,7 +67,7 @@ def _load_nonzero_species() -> frozenset[str] | None:
         return None
     try:
         data = json.loads(SPECIES_FREQ_CACHE.read_text(encoding="utf-8"))
-        return frozenset(data["nonzero_species"])
+        return frozenset(data["species_frequencies"].keys())
     except (json.JSONDecodeError, KeyError, OSError) as exc:
         logging.warning(
             "Could not read species frequency cache (%s); all exclusions will be recorded",
