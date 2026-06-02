@@ -289,7 +289,7 @@ def aggregate_metric_windows(samples: list[dict]) -> list[dict]:
         ts = sample.get("ts", "")
         if len(ts) < 13:
             continue
-        window = ts[:13] + ":00:00" + ts[19:]  # truncate to hour
+        window = ts[:13] + ":00:00+00:00"  # truncate to hour
         bucket = buckets.setdefault(window, {})
         for key, val in sample.items():
             if key == "ts" or not isinstance(val, (int, float)):
