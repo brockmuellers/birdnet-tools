@@ -38,8 +38,7 @@ SPECIES_FREQ_CACHE = REPO_DIR / ".species_freq_cache.json"
 _LOCK_FH = None
 
 EXCLUSION_MARKER = "Excluded as below Species Occurrence Frequency Threshold: "
-# Non-bird sounds aggregated into a single count event rather than individual exclusion events
-NON_BIRD_SPECIES = ["Fireworks", "Engine", "Dog", "Siren"]
+NON_BIRD_SPECIES = frozenset(["Fireworks", "Engine", "Dog", "Siren"])
 
 # Matches bracketed timestamps [2026-06-01T12:34:56...] or [2026-06-01 12:34:56]
 # and bare ISO timestamps 2026-06-01T12:34:56... at the start of a line.
@@ -183,9 +182,6 @@ def collect_journal_events(
 
     events: list[dict] = []
     new_cursor: str | None = None
-    non_bird_counts: dict[str, int] = {name: 0 for name in NON_BIRD_SPECIES}
-    window_start: str | None = None
-    window_end: str | None = None
     for line in result.stdout.splitlines():
         try:
             obj = json.loads(line)
@@ -201,9 +197,6 @@ def collect_journal_events(
         ts = datetime.fromtimestamp(
             int(obj["__REALTIME_TIMESTAMP"]) / 1e6, tz=timezone.utc
         ).isoformat()
-        if window_start is None:
-            window_start = ts
-        window_end = ts
 
         if EXCLUSION_MARKER in msg:
             # Message format: "[utils.analysis][WARNING] Excluded as below ... Threshold: Sci Name Com Name"
@@ -212,8 +205,7 @@ def collect_journal_events(
             if len(words) >= 3:
                 sci_name = " ".join(words[:2])
                 com_name = " ".join(words[2:])
-                if com_name in non_bird_counts:
-                    non_bird_counts[com_name] += 1
+                if com_name in NON_BIRD_SPECIES:
                     continue
                 if nonzero_species is not None and f"{sci_name}_{com_name}" not in nonzero_species:
                     continue
@@ -221,30 +213,13 @@ def collect_journal_events(
             else:
                 # Non-bird sounds have a 1-word sci name == com name (e.g. "Fireworks Fireworks")
                 com_name = words[-1] if words else ""
-                if com_name in non_bird_counts:
-                    non_bird_counts[com_name] += 1
+                if com_name in NON_BIRD_SPECIES:
                     continue
                 event_msg = f"Excluded: {msg[idx:].strip()}"
             events.append({"ts": ts, "level": "INFO", "source": "birdnet", "msg": event_msg})
         elif "][ERROR]" in msg:
             # BirdNET-Pi uses Python logging with format "[module][LEVEL] message"
             events.append({"ts": ts, "level": "ERROR", "source": "birdnet", "msg": msg})
-
-    if any(c > 0 for c in non_bird_counts.values()):
-        parts = ", ".join(f"{non_bird_counts[n]} {n}" for n in NON_BIRD_SPECIES)
-        if window_start and window_end:
-            fmt = "%H:%M"
-            t0 = datetime.fromisoformat(window_start).strftime(fmt)
-            t1 = datetime.fromisoformat(window_end).strftime(fmt)
-            window_str = f" ({t0}–{t1} UTC)"
-        else:
-            window_str = ""
-        events.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": "INFO",
-            "source": "birdnet",
-            "msg": f"Detected: {parts}{window_str}",
-        })
 
     return events, new_cursor
 
