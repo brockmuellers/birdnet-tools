@@ -296,9 +296,9 @@ Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jo
 
 ### refresh_species_freq.py
 
-Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week of year and your configured lat/lon, then writes `.species_freq_cache.json` at the repo root. The cache stores a `species_frequencies` map of `{name: score}` for every species in the band `0 < frequency <= SF_THRESH` — species that are present in your region this week but below BirdNET-Pi's exclusion threshold. `SF_THRESH` is read from `/etc/birdnet/birdnet.conf` (defaults to `0.03` if the file is absent).
+Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week of year and your configured lat/lon, then writes `.species_freq_cache.json` at the repo root. The cache stores a `species_frequencies` map of `{name: score}` for every species with `0 < frequency <= 0.05` (the maximum possible SF_THRESH in BirdNET-Pi) — all species present in your region this week at any below-threshold frequency.
 
-`push_events.py` reads this cache to surface frequency-exclusion events only for species in this band. Zero-frequency species (birds never expected in your region) are suppressed, as are species above the threshold (which pass BirdNET-Pi's filter and wouldn't be excluded anyway). If the cache is absent or unreadable, `push_events.py` falls back to recording all exclusions.
+`push_events.py` reads this cache to surface frequency-exclusion events only for species present in your region. Zero-frequency species (birds never expected in your region) are suppressed. If the cache is absent or unreadable, `push_events.py` falls back to recording all exclusions.
 
 Frequencies are scored per ISO week of year, so the cache is refreshed every Monday at 1am to stay in sync with the model's seasonal scores.
 
