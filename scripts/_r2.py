@@ -1,6 +1,7 @@
 """Shared Cloudflare R2 upload utilities (AWS SigV4 via stdlib urllib)."""
 import hashlib
 import hmac
+import logging
 import os
 import sys
 import time
@@ -118,13 +119,12 @@ def upload_to_r2(
                 return
         except urllib.error.HTTPError as e:
             body_text = e.read().decode(errors="replace")
-            print(f"ERROR: R2 upload failed: HTTP {e.code} {e.reason}", file=sys.stderr)
-            if body_text:
-                print(body_text, file=sys.stderr)
+            logging.error("R2 upload failed: HTTP %s %s%s", e.code, e.reason,
+                          f"\n{body_text}" if body_text else "")
             sys.exit(1)
         except urllib.error.URLError as e:
-            print(f"WARN: R2 upload attempt {attempt}/5 failed: {e.reason}", file=sys.stderr)
+            logging.warning("R2 upload attempt %d/5 failed: %s", attempt, e.reason)
             if attempt < 5:
                 time.sleep(_BACKOFF[attempt - 1])
-    print("ERROR: R2 upload failed after 5 attempts", file=sys.stderr)
+    logging.error("R2 upload failed after 5 attempts")
     sys.exit(1)
