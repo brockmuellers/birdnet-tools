@@ -260,16 +260,23 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
     return events, new_offset
 
 
-def check_ip_change(state: dict) -> list[dict]:
-    """Return a WARN event if primary_ip changed since the last run, and update state."""
+def check_network_health(state: dict) -> list[dict]:
+    """Return events for IPv4 connectivity loss or IP address change since the last run."""
+    # UDP connect; no packets sent, but fails if the kernel has no route — won't catch
+    # IP conflicts where routing still works but the address is contested.
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(1)
         s.connect(("8.8.8.8", 80))
         current_ip = s.getsockname()[0]
         s.close()
-    except Exception:
-        return []
+    except Exception as e:
+        return [{
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "ERROR",
+            "source": "network",
+            "msg": f"IPv4 connectivity lost: {e}",
+        }]
 
     events = []
     last_ip = state.get("last_primary_ip")
@@ -401,7 +408,7 @@ def main():
 
     state = _load_state()
 
-    ip_events = check_ip_change(state)
+    ip_events = check_network_health(state)
     if ip_events:
         _append_events(HEALTH_EVENTS, ip_events)
         logging.info("%d IP change event(s): %s", len(ip_events), ip_events[0]["msg"])
