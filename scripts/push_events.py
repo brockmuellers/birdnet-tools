@@ -418,9 +418,7 @@ def main():
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
             age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
             if age_min > UPLOAD_STALE_WARN_MIN:
-                msg = f"No successful upload in {int(age_min)} minutes (last: {last_upload})"
-                _append_events(HEALTH_EVENTS, [{"ts": datetime.now(timezone.utc).isoformat(), "level": "WARN", "source": "health", "msg": msg}])
-                logging.warning("%s", msg)
+                logging.warning("No successful upload in %d minutes (last: %s)", int(age_min), last_upload)
         except ValueError:
             pass
 
