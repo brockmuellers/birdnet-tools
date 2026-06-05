@@ -9,6 +9,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,10 +25,13 @@ HELPER_SCRIPT = Path(__file__).resolve().parent / "_model_compare_helper.py"
 def fetch_frequencies() -> tuple[dict[str, float], dict[str, float]]:
     if not BIRDNET_PYTHON.exists():
         raise FileNotFoundError(f"BirdNET-Pi venv not found at {BIRDNET_PYTHON}")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(BIRDNET_DIR / "scripts")
     result = subprocess.run(
         [str(BIRDNET_PYTHON), str(HELPER_SCRIPT)],
         capture_output=True, text=True,
         cwd=str(BIRDNET_DIR / "scripts"),
+        env=env,
     )
     if result.stderr.strip():
         logging.warning("Helper stderr:\n%s", result.stderr.strip())
