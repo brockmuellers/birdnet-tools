@@ -313,3 +313,20 @@ scripts/refresh_species_freq.py
 ```
 
 Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jobs)).
+
+### compare_range_models.py
+
+Queries both BirdNET range models (MData Model V2.4 and V2.4 - V2) for all ~6,500 species at the configured location and current week, then writes a CSV sorted by the absolute frequency difference between the two models. Useful for understanding how the two range models diverge for your region.
+
+#### Prerequisites
+
+- BirdNET-Pi installed at `~/BirdNET-Pi` (uses its Python venv and both metadata models)
+
+#### Usage
+
+```
+scripts/compare_range_models.py --output results.csv
+scripts/compare_range_models.py --output results.csv --include-zeros
+```
+
+The output CSV has columns: `species`, `freq_v1`, `freq_v2`, `distance`. Species where both models score 0 are excluded by default; pass `--include-zeros` to keep them.
