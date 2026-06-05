@@ -69,6 +69,28 @@ def _tcp_check(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+def _default_gateway() -> str | None:
+    """Return the IPv4 default gateway from /proc/net/route, or None if not found."""
+    try:
+        for line in Path("/proc/net/route").read_text(encoding="utf-8").splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 3 and parts[1] == "00000000" and parts[2] != "00000000":
+                gw_hex = parts[2]
+                if len(gw_hex) == 8:
+                    return ".".join(str(b) for b in bytes.fromhex(gw_hex)[::-1])
+    except OSError:
+        pass
+    return None
+
+
+def _ping(host: str, count: int = 2, timeout: int = 2) -> bool:
+    result = subprocess.run(
+        ["ping", "-n", "-c", str(count), "-W", str(timeout), host],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def _acquire_lock() -> None:
     global _LOCK_FH
     _LOCK_FH = LOCK_FILE.open("w")
@@ -215,6 +237,17 @@ def main():
             msg = f"Service {svc} not reachable on port {port}"
             _append_event(HEALTH_EVENTS, {"ts": now, "level": "ERROR", "source": "services", "msg": msg})
             logging.error("%s", msg)
+
+    # Gateway reachability
+    gw = _default_gateway()
+    if gw is None:
+        logging.warning("Could not determine default gateway from /proc/net/route")
+    elif not _ping(gw):
+        msg = f"Default gateway {gw} is unreachable"
+        _append_event(HEALTH_EVENTS, {"ts": now, "level": "ERROR", "source": "network", "msg": msg})
+        logging.error("%s", msg)
+    else:
+        logging.info("Gateway %s reachable", gw)
 
 
 if __name__ == "__main__":

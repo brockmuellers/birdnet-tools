@@ -406,7 +406,23 @@ def main():
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
 
+    UPLOAD_STALE_WARN_MIN = int(os.environ.get("UPLOAD_STALE_WARN_MIN", "29"))
+
     state = _load_state()
+
+    last_upload = state.get("last_successful_upload_at")
+    if last_upload:
+        try:
+            last_dt = datetime.fromisoformat(last_upload)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+            if age_min > UPLOAD_STALE_WARN_MIN:
+                msg = f"No successful upload in {int(age_min)} minutes (last: {last_upload})"
+                _append_events(HEALTH_EVENTS, [{"ts": datetime.now(timezone.utc).isoformat(), "level": "WARN", "source": "health", "msg": msg}])
+                logging.warning("%s", msg)
+        except ValueError:
+            pass
 
     ip_events = check_network_health(state)
     if ip_events:
