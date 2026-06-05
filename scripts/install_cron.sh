@@ -25,7 +25,8 @@ new_entries="REPO=${REPO_DIR}
 30   2 * * *  \$REPO/scripts/run_cron.sh db-r2-backup  timeout 30m \$REPO/scripts/backup_db_r2.py       >> \$REPO/logs/backup.log  2>&1
 */5  * * * *  \$REPO/scripts/run_cron.sh metrics       timeout 30  \$REPO/scripts/sample_metrics.py     >> \$REPO/logs/health.log  2>&1
 */15 * * * *  \$REPO/scripts/run_cron.sh push-events      timeout 10m \$REPO/scripts/push_events.py           >> \$REPO/logs/health.log  2>&1
-0    1 * * 1  \$REPO/scripts/run_cron.sh species-freq   timeout 5m  \$REPO/scripts/refresh_species_freq.py   >> \$REPO/logs/health.log  2>&1"
+0    1 * * 1  \$REPO/scripts/run_cron.sh species-freq   timeout 5m  \$REPO/scripts/refresh_species_freq.py   >> \$REPO/logs/health.log  2>&1
+* * * * * ping -c 1 192.168.1.254 > /dev/null 2>&1" # ARP keepalive; attempt to prevent inbound IPv4 outages
 
 {
     [[ -n "$cleaned" ]] && printf '%s\n' "$cleaned"
