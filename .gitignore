@@ -7,3 +7,4 @@ birdnet_events.jsonl
 .health_state.json
 .sample_metrics_state.json
 .species_freq_cache.json
+TODO.md

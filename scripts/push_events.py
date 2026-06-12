@@ -261,9 +261,11 @@ def collect_log_events(log_path: Path, source: str, offset: int) -> tuple[list[d
 
 
 def check_network_health(state: dict) -> list[dict]:
-    """Return events for IPv4 connectivity loss or IP address change since the last run."""
+    """Return events for IPv4 connectivity loss/recovery or IP address change since the last run."""
     # UDP connect; no packets sent, but fails if the kernel has no route — won't catch
     # IP conflicts where routing still works but the address is contested.
+    now = datetime.now(timezone.utc).isoformat()
+    was_online = state.get("network_online", True)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(1)
@@ -271,19 +273,33 @@ def check_network_health(state: dict) -> list[dict]:
         current_ip = s.getsockname()[0]
         s.close()
     except Exception as e:
-        return [{
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": "ERROR",
-            "source": "network",
-            "msg": f"IPv4 connectivity lost: {e}",
-        }]
+        state["network_online"] = False
+        # Only emit on the transition down; subsequent runs while offline are silent.
+        if was_online:
+            return [{
+                "ts": now,
+                "level": "ERROR",
+                "source": "network",
+                "msg": f"IPv4 connectivity lost: {e}",
+            }]
+        return []
 
     events = []
+    state["network_online"] = True
+    # Only emit on the transition back up; already-online runs are silent.
+    if not was_online:
+        events.append({
+            "ts": now,
+            "level": "INFO",
+            "source": "network",
+            "msg": "IPv4 connectivity restored",
+        })
+
     last_ip = state.get("last_primary_ip")
     if last_ip and last_ip != current_ip:
         msg = f"primary_ip changed from {last_ip} to {current_ip} — mDNS hostname (.local) may no longer resolve correctly"
         events.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": now,
             "level": "WARN",
             "source": "network",
             "msg": msg,

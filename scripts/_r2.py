@@ -113,6 +113,7 @@ def upload_to_r2(
     req = urllib.request.Request(url, data=body, method="PUT", headers=request_headers)
 
     _BACKOFF = [5, 10, 20, 40]  # seconds between attempts 1→2, 2→3, 3→4, 4→5
+    last_reason: str = ""
     for attempt in range(1, 6):
         try:
             with urllib.request.urlopen(req, timeout=timeout):
@@ -123,8 +124,9 @@ def upload_to_r2(
                           f"\n{body_text}" if body_text else "")
             sys.exit(1)
         except urllib.error.URLError as e:
-            logging.warning("R2 upload attempt %d/5 failed: %s", attempt, e.reason)
+            last_reason = str(e.reason)
+            logging.info("R2 upload attempt %d/5 failed: %s", attempt, e.reason)
             if attempt < 5:
                 time.sleep(_BACKOFF[attempt - 1])
-    logging.error("R2 upload failed after 5 attempts")
+    logging.error("R2 upload failed after 5 attempts: %s", last_reason)
     sys.exit(1)
