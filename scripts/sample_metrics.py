@@ -24,6 +24,7 @@ LOCK_FILE = Path("/tmp/birdnet-sample-metrics.lock")
 HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
 METRICS_STATE_FILE = REPO_DIR / ".sample_metrics_state.json"
+HEALTH_STATE_FILE = REPO_DIR / ".health_state.json"
 TEMP_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
 _SYSTEMCTL_SERVICES = ["birdnet_analysis", "birdnet_recording", "birdnet_stats"]
 _TCP_SERVICES = {"ssh": ("127.0.0.1", 22), "caddy": ("127.0.0.1", 80)}
@@ -156,6 +157,29 @@ def main():
                     pass
                 break
     except OSError:
+        pass
+
+    # IPv4 routing probe (no packets sent; fails if kernel has no default route)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1)
+        s.connect(("8.8.8.8", 80))
+        s.close()
+        sample["network_ipv4_ok"] = 1
+    except Exception:
+        sample["network_ipv4_ok"] = 0
+
+    # Minutes since last successful R2 upload (from push_events.py state)
+    try:
+        health_state = json.loads(HEALTH_STATE_FILE.read_text(encoding="utf-8"))
+        last_upload = health_state.get("last_successful_upload_at")
+        if last_upload:
+            last_dt = datetime.fromisoformat(last_upload)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            staleness = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+            sample["upload_staleness_min"] = round(staleness, 1)
+    except (json.JSONDecodeError, OSError, ValueError):
         pass
 
     # Disk usage
