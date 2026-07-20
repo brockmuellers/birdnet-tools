@@ -335,3 +335,17 @@ scripts/compare_range_models.py --output results.csv --include-zeros
 ```
 
 The output CSV has columns: `species`, `freq_v1`, `freq_v2`, `distance`. Species where both models score 0 are excluded by default; pass `--include-zeros` to keep them.
+
+---
+
+## Display
+
+---
+
+I'm using an epaper module (WeAct 3.7" black-and-white). Setup:
+
+1. Wiring - starting from pin 11 and counting up, I have: orange, empty, empty, empty, empty, empty, red, purple, yellow, black, empty, white, green, blue. So that's 8 VCC in 17, GND in 20, SDA in 19, SCL in 23, CS in 24, D/C in 22, RES in 11, and 1 Busy in 18.
+1. Enable SPI interface - with `raspi-config`.
+1. Python deps - tricky because this is a birdnet install. Have spidev and gpiozero already installed. No Pillow, so I need to compile images on my laptop into `.bin` files instead of having that done directly on the pi. (Something that would be handy - Adafruit's e-ink display allegedly uses the same driver chip (UC8253) as the WeAct one, could attempt to use their python lib `adafruit-circuitpython-uc8253` but that's a dep to install.)
+1. Photo compilation - must be done off-Pi, for now. Use `display/compile_photo.py`. Commit the `bins` and pull them onto the Pi.
+1. Display - just doing it manually for now. Run `display/draw_bin.py`.
