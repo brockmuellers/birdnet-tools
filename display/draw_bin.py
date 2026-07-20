@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from pathlib import Path
 
 import spidev
 from gpiozero import InputDevice, OutputDevice
@@ -92,12 +93,14 @@ def sleep_display():
 # ==========================================
 if __name__ == "__main__":
     BINS_DIR = "bins"
+    script_dir = Path(__file__).parent.resolve()
+    abs_bins_dir = script_dir / BINS_DIR
 
     # Gather all .bin files
-    available_bins = [f for f in os.listdir(BINS_DIR) if f.endswith('.bin')]
+    available_bins = [f for f in os.listdir(abs_bins_dir) if f.endswith('.bin')]
 
     if not available_bins:
-        print(f"Error: No .bin files found in '{BINS_DIR}'")
+        print(f"Error: No .bin files found in '{abs_bins_dir}'")
         exit()
 
     # Select a random bird photo
@@ -105,7 +108,7 @@ if __name__ == "__main__":
     print(f"Waking screen to display: {chosen_bird}")
 
     # Read the raw byte file into a list of integers
-    with open(os.path.join(BINS_DIR, chosen_bird), "rb") as f:
+    with open(os.path.join(abs_bins_dir, chosen_bird), "rb") as f:
         image_data = list(f.read())
 
     init_display()
