@@ -3,8 +3,10 @@
 *.tmp
 __pycache__/
 display/source_photos/
-health_events.jsonl
 birdnet_events.jsonl
+cron_events.jsonl
+health_events.jsonl
+metric_samples.jsonl
 .health_state.json
 .sample_metrics_state.json
 .species_freq_cache.json
