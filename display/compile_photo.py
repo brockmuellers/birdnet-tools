@@ -2,6 +2,7 @@
 Cannot be run on the raspberry pi unless Pillow is installed
 (generally not on BirdNET-Pi installations).
 """
+import io
 import os
 
 from PIL import Image, ImageOps
@@ -22,7 +23,7 @@ for filename in os.listdir(INPUT_FOLDER):
 
         # 1. Fit to Landscape
         img = Image.open(input_path)
-        img = ImageOps.fit(img, (416, 240))
+        img = ImageOps.pad(img, (416, 240))
 
         # 2. ROTATE to match the hardware's native Portrait memory map
         img = img.transpose(Image.Transpose.ROTATE_270)
@@ -31,7 +32,7 @@ for filename in os.listdir(INPUT_FOLDER):
         img = img.convert('1')
 
         # 4. Translate pixels into raw bytes
-        pixels = list(img.getdata())
+        pixels = list(img.get_flattened_data())
         byte_array = bytearray()
 
         for i in range(0, len(pixels), 8):
@@ -45,5 +46,8 @@ for filename in os.listdir(INPUT_FOLDER):
             f.write(byte_array)
 
         print(f"Processed: {filename} -> {output_filename}")
+
+        # 5. View the image using your system's default viewer
+        img.show()
 
 print("Done! Transfer the new 'bird_bins' folder to your Raspberry Pi.")

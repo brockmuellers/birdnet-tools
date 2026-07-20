@@ -64,12 +64,16 @@ def init_display():
     send_data(0x0F)
 
     send_command(0x61) # Set Resolution (240x416; portrait)
-    send_data([0x00, 0xF0, 0x01, 0xA0])
+    send_data([0xF0, 0x01, 0xA0])
 
 def display_image(image_data):
     # 3. Push Image Data
     # Buffer 0x13 is strictly used for new image data on this controller
     send_command(0x13) # Data Start Transmission
+    send_data(image_data)
+
+    # For some reason, also need to do 0x10, otherwise the result is striped
+    send_command(0x10) # Data Start Transmission
     send_data(image_data)
 
     # 4. Refresh Screen
