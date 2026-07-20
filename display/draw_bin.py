@@ -10,12 +10,10 @@ from gpiozero import InputDevice, OutputDevice
 # ==========================================
 RST_PIN = 17   # Reset pin
 DC_PIN = 25    # Data/Command pin
-CS_PIN = 8     # Chip Select (CE0)
 BUSY_PIN = 24  # Busy pin
 
 rst = OutputDevice(RST_PIN, initial_value=True)
 dc = OutputDevice(DC_PIN, initial_value=False)
-cs = OutputDevice(CS_PIN, initial_value=True)
 busy = InputDevice(BUSY_PIN)
 
 # ==========================================
@@ -28,13 +26,11 @@ spi.mode = 0b00
 
 def send_command(cmd):
     dc.off() # Low = Command mode
-    cs.off() # Select display
+    # spidev handles the CS pin automatically here!
     spi.xfer2([cmd])
-    cs.on()  # Deselect display
 
 def send_data(data):
     dc.on()  # High = Data mode
-    cs.off()
     if isinstance(data, int):
         spi.xfer2([data])
     elif isinstance(data, list):
@@ -42,7 +38,6 @@ def send_data(data):
         # We chunk the 12,480 byte array to prevent overflow errors.
         for i in range(0, len(data), 4096):
             spi.xfer2(data[i:i+4096])
-    cs.on()
 
 def wait_until_idle():
     # WeAct screens usually pull the BUSY pin LOW (0) while drawing.
@@ -52,12 +47,10 @@ def wait_until_idle():
 
 def init_display():
     # 1. Hardware Reset
-    rst.on()
-    time.sleep(0.05)
     rst.off()
-    time.sleep(0.05)
+    time.sleep(0.1)
     rst.on()
-    time.sleep(0.05)
+    time.sleep(0.1)
     wait_until_idle()
 
     # 2. Standard UC8253 Initialization Sequence
@@ -70,12 +63,13 @@ def init_display():
     send_command(0x00) # Panel setting
     send_data(0x0F)
 
-    send_command(0x61) # Set Resolution (416x240)
-    send_data([0x01, 0xA0, 0x00, 0xF0])
+    send_command(0x61) # Set Resolution (240x416; portrait)
+    send_data([0x00, 0xF0, 0x01, 0xA0])
 
 def display_image(image_data):
     # 3. Push Image Data
-    send_command(0x10) # Data Start Transmission
+    # Buffer 0x13 is strictly used for new image data on this controller
+    send_command(0x13) # Data Start Transmission
     send_data(image_data)
 
     # 4. Refresh Screen
