@@ -64,6 +64,7 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - `MEMORY_WARN_MB` — log a WARN when available memory falls below this value (default: 100 MB)
 - `EVENT_LOG_RETAIN_DAYS` — days of events to keep locally and upload (default: 7)
 - `EVENT_LOG_OBJECT_KEY` — R2 object key for the event log (default: `birdnet-events.json`)
+- `WEATHER_ENABLED` — set to `0` to make `sample_weather.py` exit immediately (e.g. dongle unplugged); default `1`
 - `WEATHER_TEMP_SENSOR_ID`, `WEATHER_RAIN_SENSOR_ID` — optional rtl_433 `id` filters (unset accepts any id)
 - `WEATHER_STALE_WARN_MIN` — WARN when a weather sensor hasn't been heard for this long (default: 30)
 - `WEATHER_RETAIN_DAYS` — days of raw weather samples / hourly windows (default: 30)

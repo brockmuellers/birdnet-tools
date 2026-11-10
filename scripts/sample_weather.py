@@ -243,6 +243,9 @@ def main():
 
     setup_logging()
     load_env(REPO_DIR / ".env")
+    if os.environ.get("WEATHER_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
+        logging.info("WEATHER_ENABLED is off; skipping")
+        return
     _acquire_lock()
 
     def _id(var: str) -> int | None:

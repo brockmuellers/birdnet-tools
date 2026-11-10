@@ -255,6 +255,8 @@ Optionally import history from an old log of raw `rtl_433` JSON lines (naive loc
 scripts/sample_weather.py --import /path/to/old_sensors.json
 ```
 
+**Turning it off:** set `WEATHER_ENABLED=0` in `.env` (e.g. when the dongle is unplugged). The script then exits immediately with no errors or stale-sensor warnings, and its cron entry can stay installed. `push_events.py` keeps uploading the existing `weather.json`; `current.*.ts` shows how old the data is.
+
 Run manually once to verify (takes about 90 seconds), then run `scripts/install_cron.sh`:
 ```
 chmod +x scripts/sample_weather.py
