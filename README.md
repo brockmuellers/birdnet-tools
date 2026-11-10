@@ -289,7 +289,7 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 ```json
 {
   "generated_at": "2026-06-01T12:00:00+00:00",
-  "timezone": "America/Los_Angeles",
+  "timezone": "America/Vancouver",
   "health": {
     "last_successful_upload_at": "...",
     "disk": {"/": {"used_pct": 42.1, "free_gb": 12.3}},
@@ -325,7 +325,7 @@ Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when weather samp
 ```json
 {
   "generated_at": "2026-11-10T01:00:00+00:00",
-  "timezone": "America/Los_Angeles",
+  "timezone": "America/Vancouver",
   "current": {
     "thermometer": {"ts": "2026-11-10T00:58:31+00:00", "temp_c": 9.7, "humidity": 88},
     "rain_gauge":  {"ts": "2026-11-10T00:58:31+00:00", "rain_mm_total": 674.624}
