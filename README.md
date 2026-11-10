@@ -327,8 +327,8 @@ Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when weather samp
   "generated_at": "2026-11-10T01:00:00+00:00",
   "timezone": "America/Los_Angeles",
   "current": {
-    "thermometer": {"ts": "2026-11-10T00:58:31+00:00", "temp_c": 9.7, "humidity": 88, "temp_battery_ok": 1},
-    "rain_gauge":  {"ts": "2026-11-10T00:58:31+00:00", "rain_mm_total": 674.624, "rain_battery_ok": 1}
+    "thermometer": {"ts": "2026-11-10T00:58:31+00:00", "temp_c": 9.7, "humidity": 88},
+    "rain_gauge":  {"ts": "2026-11-10T00:58:31+00:00", "rain_mm_total": 674.624}
   },
   "hourly": [
     {"window_start": "2026-11-10T00:00:00+00:00", "temp_c": {"min": 9.5, "max": 9.9, "avg": 9.7}, "humidity": {"min": 86.0, "max": 88.0, "avg": 87.2}, "rain_mm": 0.254}

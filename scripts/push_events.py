@@ -480,10 +480,10 @@ def build_weather_payload(samples: list[dict], daily_path: Path) -> dict:
     current: dict = {}
     temp = max((s for s in samples if "temp_c" in s), key=lambda s: s["ts"], default=None)
     if temp:
-        current["thermometer"] = {k: temp[k] for k in ("ts", "temp_c", "humidity", "temp_battery_ok") if k in temp}
+        current["thermometer"] = {k: temp[k] for k in ("ts", "temp_c", "humidity") if k in temp}
     rain = max((s for s in samples if "rain_mm_total" in s), key=lambda s: s["ts"], default=None)
     if rain:
-        current["rain_gauge"] = {k: rain[k] for k in ("ts", "rain_mm_total", "rain_battery_ok") if k in rain}
+        current["rain_gauge"] = {k: rain[k] for k in ("ts", "rain_mm_total") if k in rain}
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
