@@ -19,7 +19,7 @@ Currently, this repository:
 - Refreshes the species frequency cache weekly (`scripts/refresh_species_freq.py`). Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week and location; writes `.species_freq_cache.json` with a `species_frequencies` map for species in the band `0 < frequency <= 0.05` (the maximum possible SF_THRESH). Used by `push_events.py` to suppress zero-frequency species (not expected in this region) from exclusion events.
 - Samples a LaCrosse TX141THBv2 thermometer and an Acurite 899 rain gauge via an RTL-SDR dongle and `rtl_433` every 5 minutes (`scripts/sample_weather.py`), appending to `weather/YYYY-MM.jsonl` (one file per UTC month, never pruned: the permanent full-resolution archive for future analysis, e.g. correlating bird activity with weather). Stateless: it stores only raw readings, including the gauge's cumulative counter `rain_mm_total`. Resets the USB dongle with `usbreset` and retries once if `rtl_433` fails.
 - Aggregates events and pushes them to Cloudflare R2 every 15 minutes (`scripts/push_events.py`). Sources:
-	- `birdnet_analysis` systemd journal: species frequency exclusions for species present in the region (INFO) and errors (ERROR); exclusions for zero-frequency species (not expected in this region) are suppressed using `.species_freq_cache.json`
+	- `birdnet_analysis` systemd journal: species frequency exclusions for species present in the region (INFO) and errors (ERROR); exclusions for species below `EXCLUSION_MIN_FREQ` (default 0.01) in `.species_freq_cache.json` are suppressed, and the frequency is appended to the message
 	- `logs/export.log` / `logs/backup.log`: WARN and ERROR lines emitted by cron scripts
 	- `logs/failures.log`: non-zero exit codes captured by `run_cron.sh`
 	- `health_events.jsonl`: WARN/ERROR lines from `logs/health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`; WARN when `primary_ip` changes between runs (indicates DHCP reassignment that breaks `.local` mDNS resolution)
@@ -64,6 +64,7 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - `MEMORY_WARN_MB` — log a WARN when available memory falls below this value (default: 100 MB)
 - `EVENT_LOG_RETAIN_DAYS` — days of events to keep locally and upload (default: 7)
 - `EVENT_LOG_OBJECT_KEY` — R2 object key for the event log (default: `birdnet-events.json`)
+- `EXCLUSION_MIN_FREQ` — only report frequency exclusions for species with current-week frequency >= this (default: 0.01)
 - `WEATHER_ENABLED` — set to `0` to make `sample_weather.py` exit immediately (e.g. dongle unplugged)
 - `WEATHER_TEMP_SENSOR_ID`, `WEATHER_RAIN_SENSOR_ID` — optional rtl_433 `id` filters (unset accepts any id)
 - `WEATHER_HOURLY_DAYS` — days of hourly windows in `weather.json` (default: 30)

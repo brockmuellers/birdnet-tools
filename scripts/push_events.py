@@ -58,11 +58,12 @@ _TS_RE = re.compile(
 _LEVEL_RE = re.compile(r"\b(WARN|ERROR):\s*(.*)")
 
 
-def _load_nonzero_species() -> frozenset[str] | None:
-    """Load the set of frequency-excluded species from the weekly cache.
+def _load_species_frequencies() -> dict[str, float] | None:
+    """Load frequency-excluded species and their scores from the weekly cache.
 
-    Returns the names of species present in this region but below SF_THRESH —
-    the band that BirdNET-Pi excludes and that we want to surface as events.
+    Returns {"Sci name_Com name": frequency} for species present in this region
+    but below SF_THRESH — the band that BirdNET-Pi excludes and that we want to
+    surface as events.
     Returns None (fail-open) if the cache is absent or unreadable, so that
     all exclusions are recorded rather than silently dropped.
     """
@@ -75,8 +76,8 @@ def _load_nonzero_species() -> frozenset[str] | None:
         return None
     try:
         data = json.loads(SPECIES_FREQ_CACHE.read_text(encoding="utf-8"))
-        return frozenset(data["species_frequencies"].keys())
-    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        return {k: float(v) for k, v in data["species_frequencies"].items()}
+    except (json.JSONDecodeError, KeyError, OSError, TypeError, ValueError, AttributeError) as exc:
         logging.warning(
             "Could not read species frequency cache (%s); all exclusions will be recorded",
             exc,
@@ -174,9 +175,15 @@ def _parse_ts(ts_str: str) -> str:
 def collect_journal_events(
     state: dict,
     retain_days: int,
-    nonzero_species: frozenset[str] | None = None,
+    species_freqs: dict[str, float] | None = None,
+    min_freq: float = 0.0,
 ) -> tuple[list[dict], str | None]:
-    """Collect new birdnet_analysis journal events since the last cursor."""
+    """Collect new birdnet_analysis journal events since the last cursor.
+
+    Frequency exclusions are kept only for species in species_freqs (the
+    weekly cache) whose score is >= min_freq. If species_freqs is None (cache
+    missing), all exclusions are kept, without a frequency.
+    """
     cursor = state.get("journal_cursor")
     cmd = ["journalctl", "-u", "birdnet_analysis", "--output=json", "--no-pager"]
     if cursor:
@@ -214,9 +221,13 @@ def collect_journal_events(
                 com_name = " ".join(words[2:])
                 if com_name in NON_BIRD_SPECIES:
                     continue
-                if nonzero_species is not None and f"{sci_name}_{com_name}" not in nonzero_species:
-                    continue
-                event_msg = f"Excluded: {com_name} ({sci_name})"
+                if species_freqs is None:
+                    event_msg = f"Excluded: {com_name} ({sci_name})"
+                else:
+                    freq = species_freqs.get(f"{sci_name}_{com_name}")
+                    if freq is None or freq < min_freq:
+                        continue
+                    event_msg = f"Excluded: {com_name} ({sci_name}) (freq {freq:.3f})"
             else:
                 # Non-bird sounds have a 1-word sci name == com name (e.g. "Fireworks Fireworks")
                 com_name = words[-1] if words else ""
@@ -547,6 +558,7 @@ def main():
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
 
     UPLOAD_STALE_WARN_MIN = int(os.environ.get("UPLOAD_STALE_WARN_MIN", "29"))
+    EXCLUSION_MIN_FREQ = float(os.environ.get("EXCLUSION_MIN_FREQ", "0.01"))
 
     state = _load_state()
 
@@ -567,10 +579,12 @@ def main():
         _append_events(HEALTH_EVENTS, ip_events)
         logging.info("%d IP change event(s): %s", len(ip_events), ip_events[0]["msg"])
 
-    nonzero_species = _load_nonzero_species()
+    species_freqs = _load_species_frequencies()
 
     logging.info("Collecting journal events...")
-    journal_events, new_cursor = collect_journal_events(state, RETAIN_DAYS, nonzero_species)
+    journal_events, new_cursor = collect_journal_events(
+        state, RETAIN_DAYS, species_freqs, EXCLUSION_MIN_FREQ
+    )
     if journal_events:
         _append_events(BIRDNET_EVENTS, journal_events)
         logging.info("%d new birdnet event(s)", len(journal_events))

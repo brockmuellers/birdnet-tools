@@ -266,7 +266,7 @@ scripts/sample_weather.py
 Aggregates events from multiple sources every 15 minutes, stores them locally in two JSONL files, and uploads a merged JSON to Cloudflare R2. The R2 object is intended for consumption by an external viewer that can color-code events by severity.
 
 **Sources:**
-- `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`) and `[ERROR]`-level messages
+- `birdnet_analysis` systemd journal — species frequency exclusions (logged as `INFO`, with the species' current-week frequency; only species with frequency >= `EXCLUSION_MIN_FREQ`, default 0.01) and `[ERROR]`-level messages
 - `logs/export.log` / `logs/backup.log` — `WARN` and `ERROR` lines emitted by cron scripts
 - `logs/failures.log` — non-zero exit codes written by `run_cron.sh`
 - `health_events.jsonl` — temp threshold warnings, service-down errors, gateway-unreachable errors from `sample_metrics.py`; IP-change warnings when `primary_ip` shifts between runs (indicates DHCP reassignment that breaks `.local` mDNS); upload-staleness warnings when no successful upload has occurred in `UPLOAD_STALE_WARN_MIN` minutes (default 29)
@@ -294,7 +294,7 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
     "primary_ip": "192.168.1.42"
   },
   "events": [
-    {"ts": "...", "level": "INFO",  "source": "birdnet",   "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax)"},
+    {"ts": "...", "level": "INFO",  "source": "birdnet",   "msg": "Excluded: Black-crowned Night-Heron (Nycticorax nycticorax) (freq 0.023)"},
     {"ts": "...", "level": "WARN",  "source": "temp",      "msg": "72.1°C (exceeds threshold 70°C)"},
     {"ts": "...", "level": "ERROR", "source": "cron",      "msg": "export exited with code 1"},
     {"ts": "...", "level": "ERROR", "source": "services",  "msg": "Service birdnet_analysis is inactive"},
@@ -350,6 +350,7 @@ Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when weather samp
    # EVENT_LOG_RETAIN_DAYS=7              # optional, this is the default
    # EVENT_LOG_OBJECT_KEY=birdnet-events.json  # optional, this is the default
    # UPLOAD_STALE_WARN_MIN=29             # optional, this is the default
+   # EXCLUSION_MIN_FREQ=0.01              # optional; hide exclusions for species below this frequency
    # WEATHER_HOURLY_DAYS=30               # optional; days of hourly windows in weather.json
    # WEATHER_OBJECT_KEY=weather.json      # optional, this is the default
    ```
@@ -372,7 +373,7 @@ Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jo
 
 Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week of year and your configured lat/lon, then writes `.species_freq_cache.json` at the repo root. The cache stores a `species_frequencies` map of `{name: score}` for every species with `0 < frequency <= 0.05` (the maximum possible SF_THRESH in BirdNET-Pi) — all species present in your region this week at any below-threshold frequency.
 
-`push_events.py` reads this cache to surface frequency-exclusion events only for species present in your region. Zero-frequency species (birds never expected in your region) are suppressed. If the cache is absent or unreadable, `push_events.py` falls back to recording all exclusions.
+`push_events.py` reads this cache to surface frequency-exclusion events only for species present in your region. Species below `EXCLUSION_MIN_FREQ` (default 0.01), including zero-frequency species never expected in your region, are suppressed; the frequency is appended to each event message. If the cache is absent or unreadable, `push_events.py` falls back to recording all exclusions (without a frequency).
 
 Frequencies are scored per ISO week of year, so the cache is refreshed every Monday at 1am to stay in sync with the model's seasonal scores.
 
