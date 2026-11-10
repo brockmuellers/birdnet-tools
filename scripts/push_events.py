@@ -26,7 +26,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from _r2 import load_env, upload_to_r2
@@ -425,18 +425,21 @@ def _utc_hour(ts: str) -> str:
 
 
 def _local_day(ts: str) -> str:
-    """Local midnight (with UTC offset) of the day containing ts."""
-    day = datetime.fromisoformat(ts).astimezone().date()
-    return datetime.combine(day, dt_time()).astimezone().isoformat()
+    """Local calendar date (YYYY-MM-DD) of ts."""
+    return datetime.fromisoformat(ts).astimezone().date().isoformat()
 
 
 def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
     """Bucket weather samples by window_key(ts): min/max/avg for temp_c and humidity, summed rain_mm.
 
-    Entries have the same shape as metric_windows, except rain_mm is a plain number (mm of
-    rain in the window). A key is absent when its sensor was not heard during the window.
+    samples must be in time order. rain_mm is derived from consecutive rain_mm_total
+    readings and credited to the window of the later one, so rain during a gauge outage
+    lands where the gauge comes back. A counter decrease (battery change) counts the new
+    total as rain since the reset. A key is absent when its sensor was not heard during
+    the window.
     """
     buckets: dict[str, dict] = {}
+    prev_total = None
     for sample in samples:
         try:
             window = window_key(sample.get("ts", ""))
@@ -446,8 +449,12 @@ def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
         for key in _WEATHER_GAUGES:
             if isinstance(sample.get(key), (int, float)):
                 bucket.setdefault(key, []).append(float(sample[key]))
-        if isinstance(sample.get("rain_mm"), (int, float)):
-            bucket["rain_mm"] = bucket.get("rain_mm", 0.0) + sample["rain_mm"]
+        total = sample.get("rain_mm_total")
+        if isinstance(total, (int, float)):
+            if prev_total is not None:
+                delta = total - prev_total if total >= prev_total else total
+                bucket["rain_mm"] = bucket.get("rain_mm", 0.0) + delta
+            prev_total = total
 
     windows = []
     for window_start, metrics in sorted(buckets.items()):
@@ -462,7 +469,8 @@ def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
                 }
         if "rain_mm" in metrics:
             entry["rain_mm"] = round(metrics["rain_mm"], 3)
-        windows.append(entry)
+        if len(entry) > 1:
+            windows.append(entry)
     return windows
 
 
@@ -471,19 +479,17 @@ def build_weather_payload(samples: list[dict], daily_path: Path) -> dict:
     days = aggregate_weather(samples, _local_day)
     today = datetime.now().astimezone().date().isoformat()
     rolled = _load_events(daily_path)
-    done = {d["window_start"][:10] for d in rolled}
-    new_days = [d for d in days if d["window_start"][:10] < today and d["window_start"][:10] not in done]
+    done = {d["window_start"] for d in rolled}
+    new_days = [d for d in days if d["window_start"] < today and d["window_start"] not in done]
     _append_events(daily_path, new_days)
     daily = sorted(rolled + new_days, key=lambda d: d["window_start"])
-    daily += [d for d in days if d["window_start"][:10] == today]
+    daily += [d for d in days if d["window_start"] == today]
 
     current: dict = {}
-    temp = max((s for s in samples if "temp_c" in s), key=lambda s: s["ts"], default=None)
-    if temp:
-        current["thermometer"] = {k: temp[k] for k in ("ts", "temp_c", "humidity") if k in temp}
-    rain = max((s for s in samples if "rain_mm_total" in s), key=lambda s: s["ts"], default=None)
-    if rain:
-        current["rain_gauge"] = {k: rain[k] for k in ("ts", "rain_mm_total") if k in rain}
+    for name, keys in (("thermometer", ("temp_c", "humidity")), ("rain_gauge", ("rain_mm_total",))):
+        latest = max((s for s in samples if keys[0] in s), key=lambda s: s["ts"], default=None)
+        if latest:
+            current[name] = {k: latest[k] for k in ("ts", *keys) if k in latest}
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -516,9 +522,6 @@ def main():
     load_env(REPO_DIR / ".env")
     _acquire_lock()
 
-    for var in ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"):
-        if not os.environ.get(var):
-            raise RuntimeError(f"{var} is not set")
     R2_BUCKET = os.environ["R2_BUCKET"]
     EVENT_LOG_KEY = os.environ.get("EVENT_LOG_OBJECT_KEY", "birdnet-events.json")
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))

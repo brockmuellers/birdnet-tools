@@ -17,7 +17,7 @@ Currently, this repository:
 	- Weekly: wraps BirdNET-Pi's `backup_data.sh` to produce a full tar of config + DB + audio clips + spectrograms; pauses BirdNET-Pi services during the run
 - Backs up `birds.db` and the two most recent monthly weather archive files to Cloudflare R2 nightly (`scripts/backup_db_r2.py`). Aborts with an error if the DB exceeds a configurable size ceiling; warns at 80% of that ceiling. Uses SQLite's online backup API for a safe snapshot, then uploads via SigV4.
 - Refreshes the species frequency cache weekly (`scripts/refresh_species_freq.py`). Queries the BirdNET-Pi metadata model for all ~6,500 species at the current week and location; writes `.species_freq_cache.json` with a `species_frequencies` map for species in the band `0 < frequency <= 0.05` (the maximum possible SF_THRESH). Used by `push_events.py` to suppress zero-frequency species (not expected in this region) from exclusion events.
-- Samples a LaCrosse TX141THBv2 thermometer and an Acurite 899 rain gauge via an RTL-SDR dongle and `rtl_433` every 5 minutes (`scripts/sample_weather.py`), appending to `weather/YYYY-MM.jsonl` (one file per UTC month, never pruned: the permanent full-resolution archive for future analysis, e.g. correlating bird activity with weather). The gauge reports a cumulative counter; the sampler stores the per-sample delta as `rain_mm` (baseline in `.weather_state.json`, only advanced when the gauge is heard, so rain during an outage is counted on reconnect; a counter decrease is treated as a reset). Resets the USB dongle with `usbreset` and retries once if `rtl_433` fails. WARNs once when a sensor goes stale and once when it recovers.
+- Samples a LaCrosse TX141THBv2 thermometer and an Acurite 899 rain gauge via an RTL-SDR dongle and `rtl_433` every 5 minutes (`scripts/sample_weather.py`), appending to `weather/YYYY-MM.jsonl` (one file per UTC month, never pruned: the permanent full-resolution archive for future analysis, e.g. correlating bird activity with weather). Stateless: it stores only raw readings, including the gauge's cumulative counter `rain_mm_total`. Resets the USB dongle with `usbreset` and retries once if `rtl_433` fails.
 - Aggregates events and pushes them to Cloudflare R2 every 15 minutes (`scripts/push_events.py`). Sources:
 	- `birdnet_analysis` systemd journal: species frequency exclusions for species present in the region (INFO) and errors (ERROR); exclusions for zero-frequency species (not expected in this region) are suppressed using `.species_freq_cache.json`
 	- `logs/export.log` / `logs/backup.log`: WARN and ERROR lines emitted by cron scripts
@@ -25,7 +25,7 @@ Currently, this repository:
 	- `health_events.jsonl`: WARN/ERROR lines from `logs/health.log`; temp threshold WARNs, low-memory WARNs, and service-down ERRORs from `scripts/sample_metrics.py`; WARN when `primary_ip` changes between runs (indicates DHCP reassignment that breaks `.local` mDNS resolution)
 	- `metric_samples.jsonl`: periodic numeric samples from `scripts/sample_metrics.py` (every 5 min): `temp_c`, `memory_available_mb`, `wifi_signal_dbm`, `disk_root_used_pct`, `disk_root_free_gb`, `disk_backup_used_pct`, `disk_backup_free_gb`, `disk_io_read_mb`, `disk_io_write_mb` (MB read/written on the root device since the previous sample; absent on first run)
 	- Events are stored locally in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS`, merged by timestamp, and uploaded to R2. Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as `metric_windows`.
-	- Weather samples are uploaded as a separate object (`weather.json`): `current`, `hourly` (last `WEATHER_HOURLY_DAYS`), and `daily` (completed local days are appended to `weather_daily.jsonl` so each run only reads recent raw files).
+	- Weather samples are uploaded as a separate object (`weather.json`): `current`, `hourly` (last `WEATHER_HOURLY_DAYS`), and `daily` (keyed by local date; completed days are appended to `weather_daily.jsonl` so each run only reads recent raw files). Rainfall is derived from consecutive `rain_mm_total` readings and credited to the window of the later reading, so rain during a gauge outage lands where the gauge comes back; a counter decrease is treated as a reset.
 
 ## Running
 
@@ -64,11 +64,9 @@ Copy `.env.example` to `.env` and fill in credentials. Required variables:
 - `MEMORY_WARN_MB` — log a WARN when available memory falls below this value (default: 100 MB)
 - `EVENT_LOG_RETAIN_DAYS` — days of events to keep locally and upload (default: 7)
 - `EVENT_LOG_OBJECT_KEY` — R2 object key for the event log (default: `birdnet-events.json`)
-- `WEATHER_ENABLED` — set to `0` to make `sample_weather.py` exit immediately (e.g. dongle unplugged); default `1`
+- `WEATHER_ENABLED` — set to `0` to make `sample_weather.py` exit immediately (e.g. dongle unplugged)
 - `WEATHER_TEMP_SENSOR_ID`, `WEATHER_RAIN_SENSOR_ID` — optional rtl_433 `id` filters (unset accepts any id)
-- `WEATHER_STALE_WARN_MIN` — WARN when a weather sensor hasn't been heard for this long (default: 30)
 - `WEATHER_HOURLY_DAYS` — days of hourly windows in `weather.json` (default: 30)
-- `WEATHER_ARCHIVE_PREFIX` — R2 prefix for the monthly weather archive uploaded nightly by `backup_db_r2.py` (default: `weather-archive/`)
 - `WEATHER_OBJECT_KEY` — R2 object key for weather data (default: `weather.json`)
 
 ## Key design constraints

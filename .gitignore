@@ -9,7 +9,6 @@ health_events.jsonl
 metric_samples.jsonl
 weather/
 weather_daily.jsonl
-.weather_state.json
 .health_state.json
 .sample_metrics_state.json
 .species_freq_cache.json

@@ -108,7 +108,7 @@ cp /mnt/usb/birdnet-backup/birds-db/birds-YYYY-MM-DD.db ~/BirdNET-Pi/scripts/bir
 
 Backs up `birds.db` to Cloudflare R2 nightly using SQLite's online backup API — the same safe snapshot approach as the local DB backup, but uploaded to R2 for off-site storage. The object is overwritten each run (no history kept in R2); pair it with the local backup if you want rotation.
 
-It also uploads the two most recent weather archive files (`weather/YYYY-MM.jsonl` from `sample_weather.py`) to `weather-archive/YYYY-MM.jsonl` (prefix configurable with `WEATHER_ARCHIVE_PREFIX`). Older months are already in R2 from earlier runs, so R2 ends up holding the complete raw weather history.
+It also uploads the two most recent weather archive files (`weather/YYYY-MM.jsonl` from `sample_weather.py`) to `weather-archive/YYYY-MM.jsonl`. Older months are already in R2 from earlier runs, so R2 ends up holding the complete raw weather history.
 
 Before uploading, the script checks the DB size against a configurable ceiling (`R2_DB_BACKUP_MAX_MB`). It aborts with an error if the ceiling is exceeded, and logs a warning once the DB reaches 80% of the limit. The snapshot is written to `/var/tmp` (not `/tmp`) to avoid doubling DB size in RAM on Pis where `/tmp` is a ramdisk.
 
@@ -227,18 +227,16 @@ Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jo
 
 Listens for 90 seconds on 433.92 MHz with `rtl_433` every 5 minutes and appends one record to `weather/YYYY-MM.jsonl` (one file per UTC month) with the latest reading from each sensor heard:
 
-- **LaCrosse TX141THBv2** thermometer (`rtl_433` protocol 73): `temp_c`, `humidity`, `temp_battery_ok`
-- **Acurite 899** rain gauge (protocol 40): `rain_mm_total` (the gauge's cumulative counter) and `rain_mm` (rain since the previous gauge reading), `rain_battery_ok`
+- **LaCrosse TX141THBv2** thermometer (`rtl_433` protocol 73): `temp_c`, `humidity`
+- **Acurite 899** rain gauge (protocol 40): `rain_mm_total` (the gauge's raw cumulative counter)
 
 Fields for a sensor that wasn't heard in that run are absent. If neither was heard, no record is written.
 
 **Archive:** the monthly files are never pruned and are the full-resolution record (~1.3 MB/month), intended for later analysis such as correlating bird activity with weather. `backup_db_r2.py` uploads the two most recent months to `weather-archive/` in R2 nightly. To load everything with pandas: `pd.concat(pd.read_json(f, lines=True) for f in sorted(glob("weather/*.jsonl")))`. `ts` is UTC; BirdNET-Pi's `Date`/`Time` columns are local time, so convert before joining.
 
-**Rain accounting:** the last counter value is kept in `.weather_state.json` and only advances when the gauge is actually heard. If the gauge is out of contact for two days and comes back 200 mm higher, the full 200 mm is recorded in the first sample after it returns. A counter decrease (battery change) is treated as a reset, and the new counter value is counted as rain since the reset. The very first reading has no baseline, so it gets no `rain_mm`.
+**Rain accounting:** the archive stores only the raw counter; rainfall is the difference between consecutive `rain_mm_total` readings (computed by `push_events.py`, or in your own analysis). If the gauge is out of contact for two days and comes back 200 mm higher, the full 200 mm is credited to the reading where it returns. A counter decrease (battery change) is treated as a reset, and the new counter value is counted as rain since the reset.
 
 **Dongle recovery:** if `rtl_433` exits non-zero without capturing anything, the RTL-SDR is reset with `usbreset 0bda:2838` and `rtl_433` is retried once. If the retry also fails, an `ERROR` is logged and the script exits 1.
-
-**Events (via `logs/health.log`):** one `WARN` when a sensor hasn't been heard for `WEATHER_STALE_WARN_MIN` minutes (default 30), and one `WARN` when it reports again.
 
 #### Prerequisites
 
@@ -247,14 +245,13 @@ Fields for a sensor that wasn't heard in that run are absent. If neither was hea
 
 #### Setup
 
-Pin the sensor ids in `.env` (recommended) so neighbours' sensors on 433 MHz are ignored. Run the script once and check `weather/` or the log to find your ids. The LaCrosse picks a new id when its batteries are changed; ignored ids are logged at INFO.
+Pin the sensor ids in `.env` (recommended) so neighbours' sensors on 433 MHz are ignored. Run the script once and check `weather/` or the log to find your ids. The LaCrosse picks a new id when its batteries are changed, so update the id after a battery swap.
 ```
 # WEATHER_TEMP_SENSOR_ID=71
 # WEATHER_RAIN_SENSOR_ID=1237
-# WEATHER_STALE_WARN_MIN=30
 ```
 
-**Turning it off:** set `WEATHER_ENABLED=0` in `.env` (e.g. when the dongle is unplugged). The script then exits immediately with no errors or stale-sensor warnings, and its cron entry can stay installed. `push_events.py` keeps uploading the existing `weather.json`; `current.*.ts` shows how old the data is.
+**Turning it off:** set `WEATHER_ENABLED=0` in `.env` (e.g. when the dongle is unplugged). The script then exits immediately without errors, and its cron entry can stay installed. `push_events.py` keeps uploading the existing `weather.json`; `current.*.ts` shows how old the data is.
 
 Run manually once to verify (takes about 90 seconds), then run `scripts/install_cron.sh`:
 ```
@@ -329,14 +326,14 @@ Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when weather samp
     {"window_start": "2026-11-10T00:00:00+00:00", "temp_c": {"min": 9.5, "max": 9.9, "avg": 9.7}, "humidity": {"min": 86.0, "max": 88.0, "avg": 87.2}, "rain_mm": 0.254}
   ],
   "daily": [
-    {"window_start": "2026-11-09T00:00:00-08:00", "temp_c": {"min": 4.1, "max": 12.3, "avg": 8.0}, "humidity": {"min": 70.0, "max": 95.0, "avg": 85.1}, "rain_mm": 6.096}
+    {"window_start": "2026-11-09", "temp_c": {"min": 4.1, "max": 12.3, "avg": 8.0}, "humidity": {"min": 70.0, "max": 95.0, "avg": 85.1}, "rain_mm": 6.096}
   ]
 }
 ```
 
 - `hourly`: UTC hours over the last `WEATHER_HOURLY_DAYS` (default 30), ascending. The shape matches `metric_windows` except `rain_mm`, which is a plain number: mm of rain in the window.
-- `daily`: local calendar days (`window_start` is local midnight with its UTC offset), ascending, for all history. The last entry is today, which is partial and still changing. Completed days are appended to `weather_daily.jsonl`, which is never pruned.
-- A key is absent from a window when its sensor wasn't heard during that window. A missing `rain_mm` means "no data", not "no rain"; `0` means the gauge reported and no rain fell. Rain that falls during a gauge outage appears in the window where the gauge comes back.
+- `daily`: local calendar days (`window_start` is the local date, `YYYY-MM-DD`), ascending, for all history. The last entry is today, which is partial and still changing. Completed days are appended to `weather_daily.jsonl`, which is never pruned.
+- A key is absent from a window when its sensor wasn't heard during that window. A missing `rain_mm` means "no data", not "no rain"; `0` means the gauge reported and no rain fell. Rain that falls during a gauge outage appears in the window where the gauge comes back. Within the last `WEATHER_HOURLY_DAYS`, the first gauge reading has nothing to compare against, so the oldest hourly window may lack `rain_mm`.
 - `current.*` is absent if that sensor has no sample within `WEATHER_HOURLY_DAYS`. Use `ts` to judge freshness (sensors are sampled every 5 minutes).
 
 #### Prerequisites

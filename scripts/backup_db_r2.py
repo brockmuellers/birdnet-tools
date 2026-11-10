@@ -2,7 +2,7 @@
 """Back up birds.db to Cloudflare R2 using SQLite's safe backup API.
 
 Also uploads the two most recent weather/YYYY-MM.jsonl archive files (written by
-sample_weather.py) to WEATHER_ARCHIVE_PREFIX, so the full-resolution weather history
+sample_weather.py) to weather-archive/, so the full-resolution weather history
 is kept off the SD card. Older months are already in R2 from earlier runs.
 """
 import fcntl
@@ -45,7 +45,7 @@ R2_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET = os.environ["R2_SECRET_ACCESS_KEY"]
 R2_BUCKET = os.environ["R2_BUCKET"]
 R2_DB_OBJECT_KEY = os.environ.get("R2_DB_BACKUP_OBJECT_KEY", "birds.db")
-WEATHER_ARCHIVE_PREFIX = os.environ.get("WEATHER_ARCHIVE_PREFIX", "weather-archive/")
+WEATHER_ARCHIVE_PREFIX = "weather-archive/"
 WEATHER_DIR = REPO_DIR / "weather"
 
 _max_mb_str = os.environ.get("R2_DB_BACKUP_MAX_MB", "")
@@ -108,7 +108,6 @@ def main():
         logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, R2_DB_OBJECT_KEY)
     finally:
         TMP_DB.unlink(missing_ok=True)
-
     logging.info("Done.")
 
 

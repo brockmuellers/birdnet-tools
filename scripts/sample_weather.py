@@ -5,17 +5,12 @@ Runs every 5 minutes via cron. Listens on 433.92 MHz for LISTEN_SECONDS and keep
 latest reading from each sensor. Samples are written to one file per UTC month and are
 never pruned: they are the permanent full-resolution archive (backed up nightly to R2 by
 backup_db_r2.py).
-- LaCrosse-TX141THBv2 thermometer: temp_c, humidity, temp_battery_ok
-- Acurite-Rain899 rain gauge:     rain_mm_total (raw counter), rain_mm (delta), rain_battery_ok
+- LaCrosse-TX141THBv2 thermometer: temp_c, humidity
+- Acurite-Rain899 rain gauge:     rain_mm_total (the gauge's raw cumulative counter)
 
-rain_mm is the rainfall since the previous rain reading, computed against the last counter
-value stored in .weather_state.json. The baseline only advances when the gauge is actually
-heard, so rain that falls while the gauge is out of range is counted (in full) on the first
-reading after it comes back. A counter decrease means the gauge reset (battery change);
-the new counter value is counted as rain since the reset.
+Rainfall per window is derived from consecutive rain_mm_total values by push_events.py.
 
-If rtl_433 fails, the RTL-SDR dongle is reset with usbreset and rtl_433 is retried once.
-Logs WARN when a sensor goes stale (not heard for WEATHER_STALE_WARN_MIN) and when it recovers."""
+If rtl_433 fails, the RTL-SDR dongle is reset with usbreset and rtl_433 is retried once."""
 import fcntl
 import json
 import logging
@@ -23,7 +18,6 @@ import os
 import subprocess
 import sys
 import time
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,12 +27,10 @@ from _utils import setup_logging
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-sample-weather.lock")
 WEATHER_DIR = REPO_DIR / "weather"
-STATE_FILE = REPO_DIR / ".weather_state.json"
 RTL_USB_ID = "0bda:2838"
 LISTEN_SECONDS = 90
 TEMP_MODEL = "LaCrosse-TX141THBv2"
 RAIN_MODEL = "Acurite-Rain899"
-SENSOR_NAMES = {TEMP_MODEL: "thermometer", RAIN_MODEL: "rain gauge"}
 RTL_CMD = [
     "rtl_433", "-f", "433.92M", "-R", "40", "-R", "73",
     "-T", str(LISTEN_SECONDS), "-F", "json",
@@ -56,30 +48,12 @@ def _acquire_lock() -> None:
         sys.exit(0)
 
 
-def _load_state() -> dict:
-    try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _save_state(state: dict) -> None:
-    tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    os.replace(tmp, STATE_FILE)
-
-
-def _append_samples(samples: list[dict]) -> None:
-    """Append samples to weather/YYYY-MM.jsonl, by the UTC month of each sample's ts."""
-    by_month: dict[str, list[dict]] = {}
-    for s in samples:
-        by_month.setdefault(s["ts"][:7], []).append(s)
+def _append_sample(sample: dict) -> None:
+    """Append sample to weather/YYYY-MM.jsonl for the UTC month of its ts."""
     WEATHER_DIR.mkdir(exist_ok=True)
-    for month, group in by_month.items():
-        lines = "".join(json.dumps(s, separators=(",", ":")) + "\n" for s in group)
-        with (WEATHER_DIR / f"{month}.jsonl").open("a", encoding="utf-8") as fh:
-            fcntl.flock(fh, fcntl.LOCK_EX)
-            fh.write(lines)
+    with (WEATHER_DIR / f"{sample['ts'][:7]}.jsonl").open("a", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        fh.write(json.dumps(sample, separators=(",", ":")) + "\n")
 
 
 def parse_readings(lines: list[str], expected_ids: dict[str, int | None]) -> list[dict]:
@@ -88,7 +62,6 @@ def parse_readings(lines: list[str], expected_ids: dict[str, int | None]) -> lis
     `expected_ids` maps model -> required id (None accepts any id).
     """
     readings = []
-    ignored: set[tuple[str, object]] = set()
     for line in lines:
         try:
             rec = json.loads(line)
@@ -98,81 +71,31 @@ def parse_readings(lines: list[str], expected_ids: dict[str, int | None]) -> lis
         if model not in expected_ids:
             continue
         want = expected_ids[model]
-        if want is not None and rec.get("id") != want:
-            ignored.add((model, rec.get("id")))
-            continue
-        readings.append(rec)
-    for model, sensor_id in sorted(ignored, key=str):
-        logging.info("Ignoring %s id %s (expected id %s)", model, sensor_id, expected_ids[model])
+        if want is None or rec.get("id") == want:
+            readings.append(rec)
     return readings
 
 
-def rain_delta(prev_total: float | None, total: float) -> float | None:
-    """Rainfall since the previous counter reading; None when there is no baseline."""
-    if prev_total is None:
-        return None
-    delta = total - prev_total
-    if delta < 0:  # counter reset (e.g. battery change): count everything since the reset
-        delta = total
-    return round(delta, 3)
-
-
 def reading_fields(rec: dict) -> dict:
-    """Map one rtl_433 record to sample fields (excluding the rain delta)."""
+    """Map one rtl_433 record to sample fields."""
     out: dict = {}
     if rec["model"] == TEMP_MODEL:
         if isinstance(rec.get("temperature_C"), (int, float)):
             out["temp_c"] = round(float(rec["temperature_C"]), 1)
         if isinstance(rec.get("humidity"), (int, float)):
             out["humidity"] = rec["humidity"]
-        if "battery_ok" in rec:
-            out["temp_battery_ok"] = rec["battery_ok"]
     elif rec["model"] == RAIN_MODEL:
         if isinstance(rec.get("rain_mm"), (int, float)):
             out["rain_mm_total"] = round(float(rec["rain_mm"]), 3)
-        if "battery_ok" in rec:
-            out["rain_battery_ok"] = rec["battery_ok"]
     return out
 
 
-def build_sample(ts: str, readings: list[dict], state: dict) -> dict | None:
-    """Combine the latest reading per sensor into one sample; advances state's rain baseline."""
+def build_sample(ts: str, readings: list[dict]) -> dict | None:
+    """Combine readings into one sample (later readings win); None if nothing usable."""
     sample: dict = {"ts": ts}
-    fields = [reading_fields(rec) for rec in readings]
-    for f in fields:  # later readings overwrite earlier ones
-        sample.update(f)
-    # The gauge repeats each message; use the most frequent counter value (latest on a tie)
-    # so a single corrupt packet can't masquerade as a counter reset.
-    totals = [f["rain_mm_total"] for f in fields if "rain_mm_total" in f]
-    if totals:
-        counts = Counter(totals)
-        sample["rain_mm_total"] = max(reversed(totals), key=lambda v: counts[v])
-    if "rain_mm_total" in sample:
-        delta = rain_delta(state.get("rain_mm_total"), sample["rain_mm_total"])
-        if delta is not None:
-            sample["rain_mm"] = delta
-        state["rain_mm_total"] = sample["rain_mm_total"]
+    for rec in readings:
+        sample.update(reading_fields(rec))
     return sample if len(sample) > 1 else None
-
-
-def check_staleness(state: dict, heard: set[str], now: datetime, stale_min: float) -> None:
-    """Log WARN once when a sensor goes stale and once when it reports again."""
-    last_seen = state.setdefault("last_seen", {})
-    stale = state.setdefault("stale", {})
-    for model, name in SENSOR_NAMES.items():
-        if model in heard:
-            if stale.get(model) and model in last_seen:
-                gap_min = (now - datetime.fromisoformat(last_seen[model])).total_seconds() / 60
-                logging.warning("Weather %s reporting again after %d minutes", name, gap_min)
-            stale[model] = False
-            last_seen[model] = now.isoformat()
-            continue
-        # Never heard: start the clock now so a sensor that never shows up still warns.
-        last_seen.setdefault(model, now.isoformat())
-        age_min = (now - datetime.fromisoformat(last_seen[model])).total_seconds() / 60
-        if age_min >= stale_min and not stale.get(model):
-            logging.warning("No reading from weather %s in %d minutes", name, age_min)
-            stale[model] = True
 
 
 def run_rtl_433() -> list[str]:
@@ -203,8 +126,8 @@ def run_rtl_433() -> list[str]:
 def main():
     setup_logging()
     load_env(REPO_DIR / ".env")
-    if os.environ.get("WEATHER_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
-        logging.info("WEATHER_ENABLED is off; skipping")
+    if os.environ.get("WEATHER_ENABLED") == "0":
+        logging.info("WEATHER_ENABLED=0; skipping")
         return
     _acquire_lock()
 
@@ -216,19 +139,14 @@ def main():
         TEMP_MODEL: _id("WEATHER_TEMP_SENSOR_ID"),
         RAIN_MODEL: _id("WEATHER_RAIN_SENSOR_ID"),
     }
-    stale_min = float(os.environ.get("WEATHER_STALE_WARN_MIN", "30"))
-    state = _load_state()
 
     readings = parse_readings(run_rtl_433(), expected_ids)
-    now = datetime.now(timezone.utc)
-    sample = build_sample(now.isoformat(), readings, state)
-    check_staleness(state, {r["model"] for r in readings}, now, stale_min)
+    sample = build_sample(datetime.now(timezone.utc).isoformat(), readings)
     if sample:
-        _append_samples([sample])
+        _append_sample(sample)
         logging.info("sample written (%s)", ", ".join(f"{k}={v}" for k, v in sample.items() if k != "ts"))
     else:
         logging.info("no sensor readings received")
-    _save_state(state)
 
 
 if __name__ == "__main__":
