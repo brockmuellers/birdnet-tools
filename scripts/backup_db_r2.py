@@ -83,6 +83,17 @@ def backup_db(src_path: str, dst_path: Path) -> None:
 
 def main():
     logging.info("Starting DB R2 backup...")
+    # Weather archive first, so a DB size/backup failure doesn't block it.
+    # Re-upload the previous month too, so the month rollover is never missed.
+    for path in sorted(WEATHER_DIR.glob("*.jsonl"))[-2:]:
+        key = WEATHER_ARCHIVE_PREFIX + path.name
+        upload_to_r2(
+            path,
+            R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, key,
+            content_type="application/x-ndjson",
+            timeout=120,
+        )
+        logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, key)
     check_size(DB_PATH)
     logging.info("Creating SQLite snapshot...")
     backup_db(DB_PATH, TMP_DB)
@@ -98,16 +109,6 @@ def main():
     finally:
         TMP_DB.unlink(missing_ok=True)
 
-    # Re-upload the previous month too, so the month rollover is never missed.
-    for path in sorted(WEATHER_DIR.glob("*.jsonl"))[-2:]:
-        key = WEATHER_ARCHIVE_PREFIX + path.name
-        upload_to_r2(
-            path,
-            R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, key,
-            content_type="application/x-ndjson",
-            timeout=120,
-        )
-        logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, key)
     logging.info("Done.")
 
 

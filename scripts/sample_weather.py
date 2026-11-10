@@ -15,12 +15,7 @@ reading after it comes back. A counter decrease means the gauge reset (battery c
 the new counter value is counted as rain since the reset.
 
 If rtl_433 fails, the RTL-SDR dongle is reset with usbreset and rtl_433 is retried once.
-Logs WARN when a sensor goes stale (not heard for WEATHER_STALE_WARN_MIN) and when it recovers.
-
-  scripts/sample_weather.py                      # normal cron run
-  scripts/sample_weather.py --import FILE        # one-off import of old rtl_433 JSON lines
-"""
-import argparse
+Logs WARN when a sensor goes stale (not heard for WEATHER_STALE_WARN_MIN) and when it recovers."""
 import fcntl
 import json
 import logging
@@ -143,11 +138,12 @@ def reading_fields(rec: dict) -> dict:
 def build_sample(ts: str, readings: list[dict], state: dict) -> dict | None:
     """Combine the latest reading per sensor into one sample; advances state's rain baseline."""
     sample: dict = {"ts": ts}
-    for rec in readings:  # later readings overwrite earlier ones
-        sample.update(reading_fields(rec))
+    fields = [reading_fields(rec) for rec in readings]
+    for f in fields:  # later readings overwrite earlier ones
+        sample.update(f)
     # The gauge repeats each message; use the most frequent counter value (latest on a tie)
     # so a single corrupt packet can't masquerade as a counter reset.
-    totals = [f["rain_mm_total"] for f in map(reading_fields, readings) if "rain_mm_total" in f]
+    totals = [f["rain_mm_total"] for f in fields if "rain_mm_total" in f]
     if totals:
         counts = Counter(totals)
         sample["rain_mm_total"] = max(reversed(totals), key=lambda v: counts[v])
@@ -196,59 +192,15 @@ def run_rtl_433() -> list[str]:
             problem = "timed out"
         if attempt == 1:
             logging.info("rtl_433 %s; resetting USB device %s", problem, RTL_USB_ID)
-            subprocess.run(["usbreset", RTL_USB_ID], capture_output=True, timeout=30)
+            try:
+                subprocess.run(["usbreset", RTL_USB_ID], capture_output=True, timeout=30)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logging.info("usbreset failed: %s", e)
             time.sleep(2)
     raise RuntimeError(f"rtl_433 {problem} (after usbreset retry)")
 
 
-def _parse_local_time(t: str) -> datetime:
-    """Parse an rtl_433 'time' field (naive local, or with a +HH:MM / +HHMM offset) to UTC."""
-    t = t.strip().replace(" ", "T")
-    try:
-        dt = datetime.fromisoformat(t)
-    except ValueError:
-        dt = datetime.strptime(t, "%Y-%m-%dT%H:%M:%S%z")
-    return dt.astimezone(timezone.utc)  # naive values are interpreted as local time
-
-
-def import_history(path: Path, expected_ids: dict[str, int | None], state: dict) -> None:
-    """Import old rtl_433 JSON lines (naive local 'time' field) into weather/YYYY-MM.jsonl."""
-    readings = parse_readings(path.read_text(encoding="utf-8").splitlines(), expected_ids)
-    timed = []
-    skipped = 0
-    for rec in readings:
-        try:
-            timed.append((_parse_local_time(str(rec["time"])), rec))
-        except (KeyError, ValueError):
-            skipped += 1
-    seen: set[tuple[datetime, str]] = set()
-    samples = []
-    prev_total = None
-    for dt, rec in sorted(timed, key=lambda x: x[0]):  # stable: file order within a timestamp
-        if (dt, rec["model"]) in seen:
-            continue
-        seen.add((dt, rec["model"]))
-        sample = {"ts": dt.isoformat(), **reading_fields(rec)}
-        if "rain_mm_total" in sample:
-            delta = rain_delta(prev_total, sample["rain_mm_total"])
-            if delta is not None:
-                sample["rain_mm"] = delta
-            prev_total = sample["rain_mm_total"]
-        if len(sample) > 1:
-            samples.append(sample)
-    _append_samples(samples)
-    # Let the first live reading count rain since the end of the imported history.
-    if prev_total is not None and "rain_mm_total" not in state:
-        state["rain_mm_total"] = prev_total
-        _save_state(state)
-    logging.info("Imported %d samples from %s (%d records skipped: unparseable time)", len(samples), path, skipped)
-
-
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--import", dest="import_file", type=Path, help="import old rtl_433 JSON lines")
-    args = parser.parse_args()
-
     setup_logging()
     load_env(REPO_DIR / ".env")
     if os.environ.get("WEATHER_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
@@ -266,10 +218,6 @@ def main():
     }
     stale_min = float(os.environ.get("WEATHER_STALE_WARN_MIN", "30"))
     state = _load_state()
-
-    if args.import_file:
-        import_history(args.import_file, expected_ids, state)
-        return
 
     readings = parse_readings(run_rtl_433(), expected_ids)
     now = datetime.now(timezone.utc)
