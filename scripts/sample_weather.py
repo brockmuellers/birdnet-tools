@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Sample weather sensors via rtl_433; append one record per run to weather_samples.jsonl.
+"""Sample weather sensors via rtl_433; append one record per run to weather/YYYY-MM.jsonl.
 
 Runs every 5 minutes via cron. Listens on 433.92 MHz for LISTEN_SECONDS and keeps the
-latest reading from each sensor:
+latest reading from each sensor. Samples are written to one file per UTC month and are
+never pruned: they are the permanent full-resolution archive (backed up nightly to R2 by
+backup_db_r2.py).
 - LaCrosse-TX141THBv2 thermometer: temp_c, humidity, temp_battery_ok
 - Acurite-Rain899 rain gauge:     rain_mm_total (raw counter), rain_mm (delta), rain_battery_ok
 
@@ -35,7 +37,7 @@ from _utils import setup_logging
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path("/tmp/birdnet-sample-weather.lock")
-WEATHER_SAMPLES = REPO_DIR / "weather_samples.jsonl"
+WEATHER_DIR = REPO_DIR / "weather"
 STATE_FILE = REPO_DIR / ".weather_state.json"
 RTL_USB_ID = "0bda:2838"
 LISTEN_SECONDS = 90
@@ -73,10 +75,16 @@ def _save_state(state: dict) -> None:
 
 
 def _append_samples(samples: list[dict]) -> None:
-    lines = "".join(json.dumps(s, separators=(",", ":")) + "\n" for s in samples)
-    with WEATHER_SAMPLES.open("a", encoding="utf-8") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        fh.write(lines)
+    """Append samples to weather/YYYY-MM.jsonl, by the UTC month of each sample's ts."""
+    by_month: dict[str, list[dict]] = {}
+    for s in samples:
+        by_month.setdefault(s["ts"][:7], []).append(s)
+    WEATHER_DIR.mkdir(exist_ok=True)
+    for month, group in by_month.items():
+        lines = "".join(json.dumps(s, separators=(",", ":")) + "\n" for s in group)
+        with (WEATHER_DIR / f"{month}.jsonl").open("a", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(lines)
 
 
 def parse_readings(lines: list[str], expected_ids: dict[str, int | None]) -> list[dict]:
@@ -204,7 +212,7 @@ def _parse_local_time(t: str) -> datetime:
 
 
 def import_history(path: Path, expected_ids: dict[str, int | None], state: dict) -> None:
-    """Import old rtl_433 JSON lines (naive local 'time' field) into weather_samples.jsonl."""
+    """Import old rtl_433 JSON lines (naive local 'time' field) into weather/YYYY-MM.jsonl."""
     readings = parse_readings(path.read_text(encoding="utf-8").splitlines(), expected_ids)
     timed = []
     skipped = 0

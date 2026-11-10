@@ -7,14 +7,15 @@ Sources:
 - failures.log: non-zero exit codes captured by run_cron.sh
 - health_events.jsonl: WARN/ERROR events from health.log and temp threshold events
 - metric_samples.jsonl: periodic numeric samples written by sample_metrics.py
-- weather_samples.jsonl: weather sensor samples written by sample_weather.py
+- weather/YYYY-MM.jsonl: weather sensor samples written by sample_weather.py (never pruned)
 
 Events are stored locally in birdnet_events.jsonl, health_events.jsonl, and cron_events.jsonl,
 pruned to EVENT_LOG_RETAIN_DAYS, merged by timestamp, and uploaded to R2.
 Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as metric_windows.
 Weather samples are bucketed into hourly and daily windows and uploaded as a separate object
 (WEATHER_OBJECT_KEY). Completed local days are appended to weather_daily.jsonl, which is never
-pruned, so daily history outlives the raw samples (kept for WEATHER_RETAIN_DAYS).
+pruned, so the daily list doesn't require re-reading the full raw archive. Only the last
+WEATHER_HOURLY_DAYS of raw samples are read on each run.
 """
 import fcntl
 import json
@@ -37,7 +38,7 @@ HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 BIRDNET_EVENTS = REPO_DIR / "birdnet_events.jsonl"
 CRON_EVENTS = REPO_DIR / "cron_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
-WEATHER_SAMPLES = REPO_DIR / "weather_samples.jsonl"
+WEATHER_DIR = REPO_DIR / "weather"
 WEATHER_DAILY = REPO_DIR / "weather_daily.jsonl"
 STATE_FILE = REPO_DIR / ".health_state.json"
 SPECIES_FREQ_CACHE = REPO_DIR / ".species_freq_cache.json"
@@ -522,7 +523,7 @@ def main():
     EVENT_LOG_KEY = os.environ.get("EVENT_LOG_OBJECT_KEY", "birdnet-events.json")
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))
     WEATHER_KEY = os.environ.get("WEATHER_OBJECT_KEY", "weather.json")
-    WEATHER_RETAIN_DAYS = int(os.environ.get("WEATHER_RETAIN_DAYS", "30"))
+    WEATHER_HOURLY_DAYS = int(os.environ.get("WEATHER_HOURLY_DAYS", "30"))
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
 
     UPLOAD_STALE_WARN_MIN = int(os.environ.get("UPLOAD_STALE_WARN_MIN", "29"))
@@ -624,12 +625,11 @@ def main():
     logging.info("Total events: %d (%d health, %d birdnet, %d cron)", len(all_events), len(health), len(birdnet), len(cron))
     logging.info("Metric windows: %d (%d samples); last_hour: %d keys, last_day: %d keys", len(metric_windows), len(metric_samples), len(last_hour), len(last_day))
 
-    if WEATHER_SAMPLES.exists():
-        # Roll up completed days before pruning so no day is lost from the daily history.
-        weather = build_weather_payload(_load_events(WEATHER_SAMPLES), WEATHER_DAILY)
-        _prune_events(WEATHER_SAMPLES, WEATHER_RETAIN_DAYS)
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=WEATHER_RETAIN_DAYS)).isoformat()
-        weather["hourly"] = [w for w in weather["hourly"] if w["window_start"] >= cutoff]
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=WEATHER_HOURLY_DAYS)).isoformat()
+    month_files = [p for p in sorted(WEATHER_DIR.glob("*.jsonl")) if p.stem >= cutoff[:7]]
+    if month_files:
+        samples = [s for p in month_files for s in _load_events(p) if s.get("ts", "") >= cutoff]
+        weather = build_weather_payload(samples, WEATHER_DAILY)
         _upload_json(weather, WEATHER_KEY)
         logging.info("Uploaded to R2: s3://%s/%s (%d hourly, %d daily windows)",
                      R2_BUCKET, WEATHER_KEY, len(weather["hourly"]), len(weather["daily"]))

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Back up birds.db to Cloudflare R2 using SQLite's safe backup API."""
+"""Back up birds.db to Cloudflare R2 using SQLite's safe backup API.
+
+Also uploads the two most recent weather/YYYY-MM.jsonl archive files (written by
+sample_weather.py) to WEATHER_ARCHIVE_PREFIX, so the full-resolution weather history
+is kept off the SD card. Older months are already in R2 from earlier runs.
+"""
 import fcntl
 import logging
 import os
@@ -40,6 +45,8 @@ R2_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET = os.environ["R2_SECRET_ACCESS_KEY"]
 R2_BUCKET = os.environ["R2_BUCKET"]
 R2_DB_OBJECT_KEY = os.environ.get("R2_DB_BACKUP_OBJECT_KEY", "birds.db")
+WEATHER_ARCHIVE_PREFIX = os.environ.get("WEATHER_ARCHIVE_PREFIX", "weather-archive/")
+WEATHER_DIR = REPO_DIR / "weather"
 
 _max_mb_str = os.environ.get("R2_DB_BACKUP_MAX_MB", "")
 if not _max_mb_str:
@@ -90,6 +97,17 @@ def main():
         logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, R2_DB_OBJECT_KEY)
     finally:
         TMP_DB.unlink(missing_ok=True)
+
+    # Re-upload the previous month too, so the month rollover is never missed.
+    for path in sorted(WEATHER_DIR.glob("*.jsonl"))[-2:]:
+        key = WEATHER_ARCHIVE_PREFIX + path.name
+        upload_to_r2(
+            path,
+            R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, key,
+            content_type="application/x-ndjson",
+            timeout=120,
+        )
+        logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, key)
     logging.info("Done.")
 
 
