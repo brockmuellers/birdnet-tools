@@ -221,6 +221,48 @@ Run `scripts/install_cron.sh` to register the cron job (see [Cron jobs](#cron-jo
 
 ---
 
+### sample_weather.py
+
+Listens for 90 seconds on 433.92 MHz with `rtl_433` every 5 minutes and appends one record to `weather_samples.jsonl` with the latest reading from each sensor heard:
+
+- **LaCrosse TX141THBv2** thermometer (`rtl_433` protocol 73): `temp_c`, `humidity`, `temp_battery_ok`
+- **Acurite 899** rain gauge (protocol 40): `rain_mm_total` (the gauge's cumulative counter) and `rain_mm` (rain since the previous gauge reading), `rain_battery_ok`
+
+Fields for a sensor that wasn't heard in that run are absent. If neither was heard, no record is written.
+
+**Rain accounting:** the last counter value is kept in `.weather_state.json` and only advances when the gauge is actually heard. If the gauge is out of contact for two days and comes back 200 mm higher, the full 200 mm is recorded in the first sample after it returns. A counter decrease (battery change) is treated as a reset, and the new counter value is counted as rain since the reset. The very first reading has no baseline, so it gets no `rain_mm`.
+
+**Dongle recovery:** if `rtl_433` exits non-zero without capturing anything, the RTL-SDR is reset with `usbreset 0bda:2838` and `rtl_433` is retried once. If the retry also fails, an `ERROR` is logged and the script exits 1.
+
+**Events (via `logs/health.log`):** one `WARN` when a sensor hasn't been heard for `WEATHER_STALE_WARN_MIN` minutes (default 30), and one `WARN` when it reports again.
+
+#### Prerequisites
+
+- An RTL-SDR dongle (e.g. Nooelec v5, USB id `0bda:2838`) and the `rtl_433` and `usbreset` binaries, both usable by the cron user without sudo
+- No other process using the dongle. Remove any older standalone `rtl_433` cron job.
+
+#### Setup
+
+Pin the sensor ids in `.env` (recommended) so neighbours' sensors on 433 MHz are ignored. Run the script once and check `weather_samples.jsonl` or the log to find your ids. The LaCrosse picks a new id when its batteries are changed; ignored ids are logged at INFO.
+```
+# WEATHER_TEMP_SENSOR_ID=71
+# WEATHER_RAIN_SENSOR_ID=1237
+# WEATHER_STALE_WARN_MIN=30
+```
+
+Optionally import history from an old log of raw `rtl_433` JSON lines (naive local `time` field):
+```
+scripts/sample_weather.py --import /path/to/old_sensors.json
+```
+
+Run manually once to verify (takes about 90 seconds), then run `scripts/install_cron.sh`:
+```
+chmod +x scripts/sample_weather.py
+scripts/sample_weather.py
+```
+
+---
+
 ### push_events.py
 
 Aggregates events from multiple sources every 15 minutes, stores them locally in two JSONL files, and uploads a merged JSON to Cloudflare R2. The R2 object is intended for consumption by an external viewer that can color-code events by severity.
@@ -231,6 +273,7 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 - `logs/failures.log` — non-zero exit codes written by `run_cron.sh`
 - `health_events.jsonl` — temp threshold warnings, service-down errors, gateway-unreachable errors from `sample_metrics.py`; IP-change warnings when `primary_ip` shifts between runs (indicates DHCP reassignment that breaks `.local` mDNS); upload-staleness warnings when no successful upload has occurred in `UPLOAD_STALE_WARN_MIN` minutes (default 29)
 - `metric_samples.jsonl` — numeric samples written by `sample_metrics.py` every 5 minutes
+- `weather_samples.jsonl` — weather samples written by `sample_weather.py`; uploaded as a separate object (see [weather.json payload shape](#weatherjson-payload-shape))
 
 **Local storage:** events accumulate in `health_events.jsonl`, `birdnet_events.jsonl`, and `cron_events.jsonl`, pruned to `EVENT_LOG_RETAIN_DAYS` (default 7). Metric samples are stored in `metric_samples.jsonl` and bucketed into hourly min/max/avg windows for upload.
 
@@ -269,6 +312,32 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
 }
 ```
 
+#### weather.json payload shape
+
+Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when `weather_samples.jsonl` exists.
+
+```json
+{
+  "generated_at": "2026-11-10T01:00:00+00:00",
+  "timezone": "America/Los_Angeles",
+  "current": {
+    "thermometer": {"ts": "2026-11-10T00:58:31+00:00", "temp_c": 9.7, "humidity": 88, "temp_battery_ok": 1},
+    "rain_gauge":  {"ts": "2026-11-10T00:58:31+00:00", "rain_mm_total": 674.624, "rain_battery_ok": 1}
+  },
+  "hourly": [
+    {"window_start": "2026-11-10T00:00:00+00:00", "temp_c": {"min": 9.5, "max": 9.9, "avg": 9.7}, "humidity": {"min": 86.0, "max": 88.0, "avg": 87.2}, "rain_mm": 0.254}
+  ],
+  "daily": [
+    {"window_start": "2026-11-09T00:00:00-08:00", "temp_c": {"min": 4.1, "max": 12.3, "avg": 8.0}, "humidity": {"min": 70.0, "max": 95.0, "avg": 85.1}, "rain_mm": 6.096}
+  ]
+}
+```
+
+- `hourly`: UTC hours over the last `WEATHER_RETAIN_DAYS` (default 30), ascending. The shape matches `metric_windows` except `rain_mm`, which is a plain number: mm of rain in the window.
+- `daily`: local calendar days (`window_start` is local midnight with its UTC offset), ascending, for all history. The last entry is today, which is partial and still changing. Completed days are appended to `weather_daily.jsonl`, which is never pruned.
+- A key is absent from a window when its sensor wasn't heard during that window. A missing `rain_mm` means "no data", not "no rain"; `0` means the gauge reported and no rain fell. Rain that falls during a gauge outage appears in the window where the gauge comes back.
+- `current.*` is absent if that sensor has no sample within `WEATHER_RETAIN_DAYS`. Use `ts` to judge freshness (sensors are sampled every 5 minutes).
+
 #### Prerequisites
 
 - Python 3 (no third-party packages required)
@@ -283,6 +352,8 @@ Aggregates events from multiple sources every 15 minutes, stores them locally in
    # EVENT_LOG_RETAIN_DAYS=7              # optional, this is the default
    # EVENT_LOG_OBJECT_KEY=birdnet-events.json  # optional, this is the default
    # UPLOAD_STALE_WARN_MIN=29             # optional, this is the default
+   # WEATHER_RETAIN_DAYS=30               # optional; raw weather samples / hourly windows
+   # WEATHER_OBJECT_KEY=weather.json      # optional, this is the default
    ```
 
 3. Make the scripts executable:

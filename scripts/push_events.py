@@ -7,10 +7,14 @@ Sources:
 - failures.log: non-zero exit codes captured by run_cron.sh
 - health_events.jsonl: WARN/ERROR events from health.log and temp threshold events
 - metric_samples.jsonl: periodic numeric samples written by sample_metrics.py
+- weather_samples.jsonl: weather sensor samples written by sample_weather.py
 
 Events are stored locally in birdnet_events.jsonl, health_events.jsonl, and cron_events.jsonl,
 pruned to EVENT_LOG_RETAIN_DAYS, merged by timestamp, and uploaded to R2.
 Metric samples are bucketed into hourly windows (min/max/avg per key) and uploaded as metric_windows.
+Weather samples are bucketed into hourly and daily windows and uploaded as a separate object
+(WEATHER_OBJECT_KEY). Completed local days are appended to weather_daily.jsonl, which is never
+pruned, so daily history outlives the raw samples (kept for WEATHER_RETAIN_DAYS).
 """
 import fcntl
 import json
@@ -21,7 +25,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 from _r2 import load_env, upload_to_r2
@@ -33,6 +37,8 @@ HEALTH_EVENTS = REPO_DIR / "health_events.jsonl"
 BIRDNET_EVENTS = REPO_DIR / "birdnet_events.jsonl"
 CRON_EVENTS = REPO_DIR / "cron_events.jsonl"
 METRIC_SAMPLES = REPO_DIR / "metric_samples.jsonl"
+WEATHER_SAMPLES = REPO_DIR / "weather_samples.jsonl"
+WEATHER_DAILY = REPO_DIR / "weather_daily.jsonl"
 STATE_FILE = REPO_DIR / ".health_state.json"
 SPECIES_FREQ_CACHE = REPO_DIR / ".species_freq_cache.json"
 _LOCK_FH = None
@@ -409,17 +415,114 @@ def aggregate_metric_windows(samples: list[dict]) -> list[dict]:
     return windows
 
 
+_WEATHER_GAUGES = ("temp_c", "humidity")
+
+
+def _utc_hour(ts: str) -> str:
+    dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+    return dt.replace(minute=0, second=0, microsecond=0).isoformat()
+
+
+def _local_day(ts: str) -> str:
+    """Local midnight (with UTC offset) of the day containing ts."""
+    day = datetime.fromisoformat(ts).astimezone().date()
+    return datetime.combine(day, dt_time()).astimezone().isoformat()
+
+
+def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
+    """Bucket weather samples by window_key(ts): min/max/avg for temp_c and humidity, summed rain_mm.
+
+    Entries have the same shape as metric_windows, except rain_mm is a plain number (mm of
+    rain in the window). A key is absent when its sensor was not heard during the window.
+    """
+    buckets: dict[str, dict] = {}
+    for sample in samples:
+        try:
+            window = window_key(sample.get("ts", ""))
+        except ValueError:
+            continue
+        bucket = buckets.setdefault(window, {})
+        for key in _WEATHER_GAUGES:
+            if isinstance(sample.get(key), (int, float)):
+                bucket.setdefault(key, []).append(float(sample[key]))
+        if isinstance(sample.get("rain_mm"), (int, float)):
+            bucket["rain_mm"] = bucket.get("rain_mm", 0.0) + sample["rain_mm"]
+
+    windows = []
+    for window_start, metrics in sorted(buckets.items()):
+        entry: dict = {"window_start": window_start}
+        for key in _WEATHER_GAUGES:
+            if key in metrics:
+                vals = metrics[key]
+                entry[key] = {
+                    "min": round(min(vals), 2),
+                    "max": round(max(vals), 2),
+                    "avg": round(sum(vals) / len(vals), 2),
+                }
+        if "rain_mm" in metrics:
+            entry["rain_mm"] = round(metrics["rain_mm"], 3)
+        windows.append(entry)
+    return windows
+
+
+def build_weather_payload(samples: list[dict], daily_path: Path) -> dict:
+    """Roll completed local days into daily_path, then build the weather.json payload."""
+    days = aggregate_weather(samples, _local_day)
+    today = datetime.now().astimezone().date().isoformat()
+    rolled = _load_events(daily_path)
+    done = {d["window_start"][:10] for d in rolled}
+    new_days = [d for d in days if d["window_start"][:10] < today and d["window_start"][:10] not in done]
+    _append_events(daily_path, new_days)
+    daily = sorted(rolled + new_days, key=lambda d: d["window_start"])
+    daily += [d for d in days if d["window_start"][:10] == today]
+
+    current: dict = {}
+    temp = max((s for s in samples if "temp_c" in s), key=lambda s: s["ts"], default=None)
+    if temp:
+        current["thermometer"] = {k: temp[k] for k in ("ts", "temp_c", "humidity", "temp_battery_ok") if k in temp}
+    rain = max((s for s in samples if "rain_mm_total" in s), key=lambda s: s["ts"], default=None)
+    if rain:
+        current["rain_gauge"] = {k: rain[k] for k in ("ts", "rain_mm_total", "rain_battery_ok") if k in rain}
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "timezone": local_timezone_name(),
+        "current": current,
+        "hourly": aggregate_weather(samples, _utc_hour),
+        "daily": daily,
+    }
+
+
+def _upload_json(payload: dict, object_key: str) -> None:
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".json", prefix="birdnet-push-")
+    tmp_path = Path(tmp_path_str)
+    try:
+        os.close(fd)
+        tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        upload_to_r2(
+            tmp_path,
+            os.environ["R2_ENDPOINT_URL"], os.environ["R2_ACCESS_KEY_ID"],
+            os.environ["R2_SECRET_ACCESS_KEY"], os.environ["R2_BUCKET"], object_key,
+            content_type="application/json",
+            extra_headers={"cache-control": "public, max-age=60"},
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def main():
     setup_logging()
     load_env(REPO_DIR / ".env")
     _acquire_lock()
 
-    R2_ENDPOINT = os.environ["R2_ENDPOINT_URL"]
-    R2_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
-    R2_SECRET = os.environ["R2_SECRET_ACCESS_KEY"]
+    for var in ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"):
+        if not os.environ.get(var):
+            raise RuntimeError(f"{var} is not set")
     R2_BUCKET = os.environ["R2_BUCKET"]
     EVENT_LOG_KEY = os.environ.get("EVENT_LOG_OBJECT_KEY", "birdnet-events.json")
     RETAIN_DAYS = int(os.environ.get("EVENT_LOG_RETAIN_DAYS", "7"))
+    WEATHER_KEY = os.environ.get("WEATHER_OBJECT_KEY", "weather.json")
+    WEATHER_RETAIN_DAYS = int(os.environ.get("WEATHER_RETAIN_DAYS", "30"))
     DB_PATH = os.environ.get("BIRDNETPI_DB_PATH")
 
     UPLOAD_STALE_WARN_MIN = int(os.environ.get("UPLOAD_STALE_WARN_MIN", "29"))
@@ -512,19 +615,7 @@ def main():
         "last_day": last_day,
     }
 
-    fd, tmp_path_str = tempfile.mkstemp(suffix=".json", prefix="birdnet-events-")
-    tmp_path = Path(tmp_path_str)
-    try:
-        os.close(fd)
-        tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-        upload_to_r2(
-            tmp_path,
-            R2_ENDPOINT, R2_KEY_ID, R2_SECRET, R2_BUCKET, EVENT_LOG_KEY,
-            content_type="application/json",
-            extra_headers={"cache-control": "public, max-age=60"},
-        )
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    _upload_json(payload, EVENT_LOG_KEY)
 
     state["last_successful_upload_at"] = datetime.now(timezone.utc).isoformat()
     _save_state(state)
@@ -532,6 +623,16 @@ def main():
     logging.info("Uploaded to R2: s3://%s/%s", R2_BUCKET, EVENT_LOG_KEY)
     logging.info("Total events: %d (%d health, %d birdnet, %d cron)", len(all_events), len(health), len(birdnet), len(cron))
     logging.info("Metric windows: %d (%d samples); last_hour: %d keys, last_day: %d keys", len(metric_windows), len(metric_samples), len(last_hour), len(last_day))
+
+    if WEATHER_SAMPLES.exists():
+        # Roll up completed days before pruning so no day is lost from the daily history.
+        weather = build_weather_payload(_load_events(WEATHER_SAMPLES), WEATHER_DAILY)
+        _prune_events(WEATHER_SAMPLES, WEATHER_RETAIN_DAYS)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=WEATHER_RETAIN_DAYS)).isoformat()
+        weather["hourly"] = [w for w in weather["hourly"] if w["window_start"] >= cutoff]
+        _upload_json(weather, WEATHER_KEY)
+        logging.info("Uploaded to R2: s3://%s/%s (%d hourly, %d daily windows)",
+                     R2_BUCKET, WEATHER_KEY, len(weather["hourly"]), len(weather["daily"]))
     logging.info("Done.")
 
 
