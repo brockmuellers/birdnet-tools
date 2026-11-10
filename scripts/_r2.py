@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -20,6 +21,8 @@ def load_env(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
+        # Strip inline comments ("VALUE   # note"); a '#' not preceded by whitespace is kept.
+        val = re.split(r"\s+#", val, maxsplit=1)[0]
         os.environ.setdefault(key.strip(), val.strip())
 
 
