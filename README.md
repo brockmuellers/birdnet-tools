@@ -333,7 +333,7 @@ Uploaded to `WEATHER_OBJECT_KEY` (default `weather.json`) only when weather samp
 
 - `hourly`: UTC hours over the last `WEATHER_HOURLY_DAYS` (default 30), ascending. The shape matches `metric_windows` except `rain_mm`, which is a plain number: mm of rain in the window.
 - `daily`: local calendar days (`window_start` is the local date, `YYYY-MM-DD`), ascending, for all history. The last entry is today, which is partial and still changing. Completed days are appended to `weather_daily.jsonl`, which is never pruned.
-- A key is absent from a window when its sensor wasn't heard during that window. A missing `rain_mm` means "no data", not "no rain"; `0` means the gauge reported and no rain fell. Rain that falls during a gauge outage appears in the window where the gauge comes back. Within the last `WEATHER_HOURLY_DAYS`, the first gauge reading has nothing to compare against, so the oldest hourly window may lack `rain_mm`.
+- A key is absent from a window when its sensor wasn't heard during that window. A missing `rain_mm` means "no data", not "no rain"; `0` means the gauge reported and no rain fell. Rain that falls during a gauge outage appears in the window where the gauge comes back.
 - `current.*` is absent if that sensor has no sample within `WEATHER_HOURLY_DAYS`. Use `ts` to judge freshness (sensors are sampled every 5 minutes).
 
 #### Prerequisites

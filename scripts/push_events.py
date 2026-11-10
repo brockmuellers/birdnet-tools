@@ -429,17 +429,34 @@ def _local_day(ts: str) -> str:
     return datetime.fromisoformat(ts).astimezone().date().isoformat()
 
 
-def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
+def load_weather(weather_dir: Path, cutoff: str) -> tuple[list[dict], float | None]:
+    """Return samples with ts >= cutoff in time order, and the last rain_mm_total before cutoff.
+
+    The baseline means rain during a gauge outage that spans the cutoff is still counted.
+    """
+    samples: list[dict] = []
+    baseline = None
+    for path in sorted(weather_dir.glob("*.jsonl"), reverse=True):
+        rows = sorted(_load_events(path), key=lambda s: s.get("ts", ""))
+        samples += [s for s in rows if s.get("ts", "") >= cutoff]
+        before = [s["rain_mm_total"] for s in rows if s.get("ts", "") < cutoff and "rain_mm_total" in s]
+        if before:
+            baseline = before[-1]
+            break
+    samples.sort(key=lambda s: s.get("ts", ""))
+    return samples, baseline
+
+
+def aggregate_weather(samples: list[dict], window_key, prev_total: float | None = None) -> list[dict]:
     """Bucket weather samples by window_key(ts): min/max/avg for temp_c and humidity, summed rain_mm.
 
-    samples must be in time order. rain_mm is derived from consecutive rain_mm_total
+    samples must be in time order; prev_total is the rain_mm_total before the first sample. rain_mm is derived from consecutive rain_mm_total
     readings and credited to the window of the later one, so rain during a gauge outage
     lands where the gauge comes back. A counter decrease (battery change) counts the new
     total as rain since the reset. A key is absent when its sensor was not heard during
     the window.
     """
     buckets: dict[str, dict] = {}
-    prev_total = None
     for sample in samples:
         try:
             window = window_key(sample.get("ts", ""))
@@ -474,9 +491,9 @@ def aggregate_weather(samples: list[dict], window_key) -> list[dict]:
     return windows
 
 
-def build_weather_payload(samples: list[dict], daily_path: Path) -> dict:
+def build_weather_payload(samples: list[dict], rain_baseline: float | None, daily_path: Path) -> dict:
     """Roll completed local days into daily_path, then build the weather.json payload."""
-    days = aggregate_weather(samples, _local_day)
+    days = aggregate_weather(samples, _local_day, rain_baseline)
     today = datetime.now().astimezone().date().isoformat()
     rolled = _load_events(daily_path)
     done = {d["window_start"] for d in rolled}
@@ -495,7 +512,7 @@ def build_weather_payload(samples: list[dict], daily_path: Path) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": local_timezone_name(),
         "current": current,
-        "hourly": aggregate_weather(samples, _utc_hour),
+        "hourly": aggregate_weather(samples, _utc_hour, rain_baseline),
         "daily": daily,
     }
 
@@ -629,10 +646,9 @@ def main():
     logging.info("Metric windows: %d (%d samples); last_hour: %d keys, last_day: %d keys", len(metric_windows), len(metric_samples), len(last_hour), len(last_day))
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=WEATHER_HOURLY_DAYS)).isoformat()
-    month_files = [p for p in sorted(WEATHER_DIR.glob("*.jsonl")) if p.stem >= cutoff[:7]]
-    if month_files:
-        samples = [s for p in month_files for s in _load_events(p) if s.get("ts", "") >= cutoff]
-        weather = build_weather_payload(samples, WEATHER_DAILY)
+    if WEATHER_DIR.is_dir():
+        samples, rain_baseline = load_weather(WEATHER_DIR, cutoff)
+        weather = build_weather_payload(samples, rain_baseline, WEATHER_DAILY)
         _upload_json(weather, WEATHER_KEY)
         logging.info("Uploaded to R2: s3://%s/%s (%d hourly, %d daily windows)",
                      R2_BUCKET, WEATHER_KEY, len(weather["hourly"]), len(weather["daily"]))
