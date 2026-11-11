@@ -63,8 +63,12 @@ def upload_to_r2(
     service = "s3"
 
     host = urllib.parse.urlparse(endpoint).netloc
-    url = f"{endpoint}/{bucket}/{object_key}"
-    canonical_uri = f"/{bucket}/{urllib.parse.quote(object_key, safe='')}"
+    # S3 SigV4 keeps '/' literal in the canonical URI; encoding it as %2F
+    # (while the request path keeps '/') gives 403 SignatureDoesNotMatch.
+    # Use the same encoded path for both so they can never diverge.
+    path = f"/{bucket}/{urllib.parse.quote(object_key, safe='/')}"
+    url = f"{endpoint}{path}"
+    canonical_uri = path
 
     headers_to_sign = {
         "content-type": content_type,
